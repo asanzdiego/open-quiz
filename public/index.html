@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Open Quiz, cuestionarios para compartir en el aula."
+    />
+    <title>Open Quiz</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="/socket.io/socket.io.js" defer></script>
+    <script src="/js/main.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Aprender juntos</p>
+      <h1>Open Quiz</h1>
+      <p class="intro">Cuestionarios para compartir en el aula.</p>
+      <p>
+        Estamos preparando las partidas. Por ahora puedes comprobar la conexión
+        con el servidor.
+      </p>
+      <p id="connection-status" class="status" role="status" aria-live="polite">
+        Conectando con el servidor…
+      </p>
+      <a class="button" href="/health">Comprobar servicio</a>
+      <noscript>
+        <p>Activa JavaScript para comprobar la conexión en tiempo real.</p>
+      </noscript>
+    </main>
+  </body>
+</html>

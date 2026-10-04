@@ -1,0 +1,49 @@
+import { createApplication } from './app.ts';
+import { readConfig } from './config/env.ts';
+
+function startServer() {
+  const config = readConfig();
+  const { httpServer, io } = createApplication();
+
+  httpServer.once('error', () => {
+    console.error(
+      JSON.stringify({
+        event: 'server_start_failed',
+        message: 'No se ha podido iniciar el servidor. Comprueba el puerto.',
+      }),
+    );
+    process.exitCode = 1;
+    io.close();
+  });
+
+  httpServer.listen(config.port, '0.0.0.0', () => {
+    console.info(
+      JSON.stringify({
+        event: 'server_started',
+        host: '0.0.0.0',
+        port: config.port,
+        environment: config.nodeEnv,
+      }),
+    );
+  });
+
+  const stopServer = () => {
+    io.close();
+  };
+
+  process.once('SIGINT', stopServer);
+  process.once('SIGTERM', stopServer);
+}
+
+try {
+  startServer();
+} catch {
+  console.error(
+    JSON.stringify({
+      event: 'server_config_invalid',
+      message:
+        'Configuración inválida: PORT debe estar entre 1 y 65535 y NODE_ENV debe ser development, test o production.',
+    }),
+  );
+  process.exitCode = 1;
+}

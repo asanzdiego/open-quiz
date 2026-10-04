@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.vitest/
+package-lock.json
+AGENTS.md
+LICENSE
+.env
+.env.*
