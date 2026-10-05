@@ -2,7 +2,7 @@
 
 Aplicación educativa de cuestionarios en tiempo real, con frontend sencillo y sin cuentas ni base de datos.
 
-**Estado actual: Fase 1 terminada.** Esta versión sirve una página inicial, permite comprobar la conexión con Socket.IO y ofrece `GET /health`. El flujo de partidas se implementará en las siguientes fases descritas en `AGENTS.md`.
+**Estado actual: Fases 1 y 2 terminadas.** Esta versión sirve una página inicial, permite comprobar la conexión con Socket.IO y ofrece `GET /health`. Incluye el dominio de sesiones y participantes en memoria y la función de puntuación, probados de forma independiente. La creación de partidas desde el navegador se implementará en la Fase 5.
 
 ## Requisitos e instalación
 
@@ -29,7 +29,7 @@ npm test
 npm run build
 ```
 
-`npm run format:check` comprueba el formato sin modificar archivos y `npm run test:watch` ejecuta las pruebas al editar. Las pruebas cubren la configuración, `/health`, el frontend estático y la conexión real de Socket.IO mediante polling y WebSocket. No requieren Nextcloud ni servicios externos.
+`npm run format:check` comprueba el formato sin modificar archivos y `npm run test:watch` ejecuta las pruebas al editar. Las pruebas cubren la configuración, `/health`, el frontend estático, la conexión real de Socket.IO mediante polling y WebSocket, y el dominio de sesiones, participantes y puntuación. No requieren Nextcloud ni servicios externos.
 
 Para ejecutar el código compilado:
 
@@ -51,7 +51,32 @@ El frontend sigue sirviéndose desde `public/`. Para detener el servidor utiliza
 | `SESSION_TTL_MINUTES`               | `120`                | Reservada para fases posteriores     |
 | `FINISHED_SESSION_TTL_MINUTES`      | `30`                 | Reservada para fases posteriores     |
 
-Las variables reservadas figuran en `.env.example`, pero todavía no se leen ni validan. La conexión con Nextcloud se configurará al implementar su adaptador.
+Las variables reservadas figuran en `.env.example`, pero todavía no se leen ni validan. En esta fase, los puntos máximos y los TTL se configuran mediante argumentos del dominio; se conectarán a las variables de entorno al integrar el flujo real. La conexión con Nextcloud se configurará al implementar su adaptador.
+
+## Dominio de sesiones y participantes
+
+`SessionService` trabaja con `InMemorySessionRepository`, sin depender de Express, Socket.IO ni almacenamiento externo. Cada servicio crea su propio repositorio salvo que se le proporcione uno. El repositorio utiliza índices por ID y código; el servicio devuelve copias para que quien lo llama no pueda modificar su estado interno.
+
+- Los identificadores de sesión y participante son UUID generados en el servidor.
+- Los códigos tienen seis caracteres, excluyen `0`, `1`, `I` y `O`, y se regeneran si colisionan. Tras 100 intentos se devuelve un error seguro.
+- Los tokens de profesor y reconexión contienen 32 bytes aleatorios, codificados en base64url. El código de partida no autoriza al profesor.
+- Los modelos completos contienen secretos y son exclusivos del backend. No deben emitirse directamente por Socket.IO ni registrarse en logs.
+- El nick se recorta y normaliza a Unicode NFC, admite hasta 24 caracteres Unicode y rechaza caracteres de control. No puede repetirse ignorando mayúsculas, incluso si el participante está desconectado. Se conserva como texto; al incorporarlo a una interfaz debe usarse `textContent`.
+- Solo se admiten nuevos participantes en `LOBBY`. Un participante existente puede reconectar con código, ID y token en cualquiera de los estados mientras la sesión siga en memoria, conservando sus puntos. Una desconexión tardía del socket anterior se ignora.
+
+Las transiciones autorizadas mediante el token del profesor son:
+
+```text
+LOBBY → QUESTION_ACTIVE → QUESTION_RESULTS → QUESTION_ACTIVE
+LOBBY → FINISHED
+QUESTION_RESULTS → FINISHED
+```
+
+Una partida terminada no se reabre. Para terminar desde una pregunta activa, primero debe pasarse por los resultados. Estas transiciones solo controlan el estado: el inicio de preguntas, el temporizador, las respuestas y el ranking corresponden a la Fase 6.
+
+`cleanupExpired({ sessionTtlMs, finishedSessionTtlMs })` elimina sesiones sin actividad al alcanzar el primer TTL y sesiones terminadas al alcanzar el segundo, medido desde `finishedAt`. Elimina también el índice de código. Ambos límites son enteros positivos en milisegundos. La limpieza se invoca explícitamente; todavía no hay un temporizador de limpieza conectado al servidor web.
+
+`calculatePoints({ isCorrect, elapsedMs, durationMs, maxPoints })` aplica la fórmula lineal, redondea a entero y limita el resultado a `[0, maxPoints]`. El máximo predeterminado es 1000. Una respuesta incorrecta o recibida al alcanzar o superar la duración obtiene cero puntos. Los tiempos negativos se limitan a cero; las duraciones no positivas, los números no finitos y los máximos inválidos generan un error. Los tiempos del dominio se expresan en milisegundos y, al integrar el juego, procederán del reloj del servidor.
 
 ## HTTP y conexión en tiempo real
 
@@ -86,6 +111,14 @@ src/
   app.ts            Express, archivos estáticos y Socket.IO sobre un servidor HTTP
   server.ts         Arranque, logs de inicio y cierre del servidor
   config/env.ts     Lectura y validación de PORT y NODE_ENV
+  domain/
+    identifiers.ts  Generación criptográfica de códigos y tokens
+    errors.ts       Errores de dominio con código y mensaje comprensible
+    participant/    Modelo y normalización del nick
+    session/        Modelo, transiciones y repositorio en memoria
+    scoring/        Función de puntuación lineal
+  services/
+    session-service.ts  Creación, participantes, reconexión y limpieza
 public/
   index.html        Página inicial
   css/styles.css    Estilos responsive
@@ -93,6 +126,10 @@ public/
 tests/
   app.test.ts       Pruebas HTTP y conexión en tiempo real
   config.test.ts    Pruebas de configuración
+  identifiers.test.ts        Formato de códigos y secretos
+  session-repository.test.ts Índices, colisiones y eliminación
+  session-service.test.ts    Sesiones, participantes, estados, reconexión y TTL
+  scoring.test.ts            Límites y fórmula de puntuación
 ```
 
 La factoría `createApplication()` permite probar la aplicación sin arrancar el proceso de producción. TypeScript se ejecuta con Node.js en desarrollo y se compila a `dist/` para `npm start`. Express y Socket.IO son las únicas dependencias de ejecución; las herramientas de calidad y los clientes de prueba son dependencias de desarrollo.
