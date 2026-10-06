@@ -8,6 +8,8 @@ import {
 } from '../domain/session/game.ts';
 import type { Session } from '../domain/session/session.ts';
 import type { SessionService } from '../services/session-service.ts';
+import { WorkbookResultsService } from '../services/workbook-results-service.ts';
+import type { WorkbookStorage } from '../services/workbook-storage.ts';
 import type { LobbyOperation, LobbyServer, LobbySocket } from './events.ts';
 import type { LobbyLog } from './lobby-handlers.ts';
 import {
@@ -28,8 +30,24 @@ export function createGameHandlers(
   io: LobbyServer,
   sessions: SessionService,
   logger: (entry: LobbyLog) => void,
+  storage: WorkbookStorage | undefined,
 ) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const results = new WorkbookResultsService(
+    sessions,
+    storage,
+    (sessionId, status) => {
+      io.to(teacherRoom(sessionId)).emit('workbook:save-updated', status);
+      if (status.status === 'saved')
+        logger({ event: 'workbook_updated', sessionId });
+      else if (status.status === 'error')
+        logger({
+          event: 'workbook_update_failed',
+          sessionId,
+          code: status.error!.code,
+        });
+    },
+  );
 
   function cancelTimer(id: string) {
     clearTimeout(timers.get(id));
@@ -51,6 +69,10 @@ export function createGameHandlers(
       }
     }
     logger({ event: 'question_closed', sessionId: session.id });
+    // Publicar ranking antes de iniciar la E/S; el resultado permanece en memoria.
+    void results.saveLatest(session.id).catch(() => {
+      logger({ event: 'workbook_update_failed', sessionId: session.id });
+    });
   }
 
   function closeExpired(id: string) {
@@ -111,9 +133,10 @@ export function createGameHandlers(
       'teacher:start-next-question',
       'teacher:close-question',
       'teacher:end-game',
+      'teacher:retry-save-results',
     ] as const) {
       socket.on(event, (payload) => {
-        void run(event, () => {
+        void run(event, async () => {
           const { sessionId, teacherToken } = parseTeacherReconnect(payload);
           const membership = socket.data.membership;
           if (
@@ -131,7 +154,13 @@ export function createGameHandlers(
             publishStarted(sessions.startNextQuestion(sessionId, teacherToken));
           else if (event === 'teacher:close-question')
             publishClosed(sessions.closeQuestion(sessionId, teacherToken));
-          else {
+          else if (event === 'teacher:retry-save-results') {
+            sessions.reconnectTeacher(sessionId, teacherToken);
+            socket.emit(
+              'workbook:save-updated',
+              await results.saveLatest(sessionId),
+            );
+          } else {
             const session = sessions.endGame(sessionId, teacherToken);
             cancelTimer(sessionId);
             const ranking = getRanking(session);

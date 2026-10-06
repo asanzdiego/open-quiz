@@ -58,7 +58,7 @@ export function registerLobbyHandlers(
   }: LobbyHandlerOptions,
 ) {
   const limiter = new LobbyRateLimiter();
-  const game = createGameHandlers(io, sessions, logger);
+  const game = createGameHandlers(io, sessions, logger, storage);
   const publishLobby = (sessionId: string) => {
     io.to(room(sessionId)).emit(
       'lobby:updated',

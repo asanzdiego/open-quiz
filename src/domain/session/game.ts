@@ -2,6 +2,7 @@ import type {
   AnswerOption,
   ParticipantResult,
   RoundResult,
+  ResultPersistence,
 } from '../question/round.ts';
 import type { Session, SessionState } from './session.ts';
 
@@ -56,6 +57,23 @@ export interface GameSnapshot {
     result: StudentResult | null;
   } | null;
   serverNow: number;
+  workbookSave: WorkbookSaveSnapshot | null;
+}
+
+export interface WorkbookSaveSnapshot extends ResultPersistence {
+  questionNumber: number;
+  worksheetName: string;
+}
+
+export function getWorkbookSave(session: Session): WorkbookSaveSnapshot | null {
+  const result = session.completedRounds.at(-1);
+  return result
+    ? {
+        questionNumber: result.questionNumber,
+        worksheetName: `P${String(result.questionNumber).padStart(2, '0')}`,
+        ...structuredClone(result.persistence),
+      }
+    : null;
 }
 
 /** Los empates conservan el orden de incorporación de Map, mediante sort estable. */
@@ -169,5 +187,6 @@ export function getGameSnapshot(
         }
       : null,
     serverNow,
+    workbookSave: participantId ? null : getWorkbookSave(session),
   };
 }

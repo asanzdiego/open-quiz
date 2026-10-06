@@ -15,6 +15,7 @@ import { InMemorySessionRepository } from '../domain/session/in-memory-session-r
 import {
   createQuestionRound,
   type RoundResult,
+  type ResultPersistence,
 } from '../domain/question/round.ts';
 import { calculatePoints } from '../domain/scoring/calculate-points.ts';
 import { getGameSnapshot, type GameSnapshot } from '../domain/session/game.ts';
@@ -185,6 +186,7 @@ export class SessionService {
         'NO_MORE_QUESTIONS',
         'No quedan preguntas. Puedes finalizar la partida.',
       );
+    this.#assertResultsSaved(session);
     return this.#startQuestion(session);
   }
 
@@ -280,6 +282,7 @@ export class SessionService {
         'La pregunta no está abierta.',
       );
     const result: RoundResult = {
+      persistence: { status: 'pending', error: null },
       questionId: round.questionId,
       questionNumber: round.questionNumber,
       correctOptionId: round.correctOptionId,
@@ -319,10 +322,42 @@ export class SessionService {
     const session = this.#requireSession(id);
     this.#authorizeTeacher(session, teacherToken);
     assertSessionTransition(session.state, 'FINISHED');
+    this.#assertResultsSaved(session);
     session.state = 'FINISHED';
     session.finishedAt = this.#now();
     session.lastActivityAt = session.finishedAt;
     return structuredClone(session);
+  }
+
+  /** Uso interno del servicio de escritura, nunca acepta payloads del navegador. */
+  setResultPersistence(
+    id: string,
+    questionId: string,
+    persistence: ResultPersistence,
+  ): void {
+    const session = this.#requireSession(id);
+    const result = session.completedRounds.find(
+      (round) => round.questionId === questionId,
+    );
+    if (!result)
+      throw new DomainError(
+        'RESULT_NOT_FOUND',
+        'No hay resultados para guardar.',
+      );
+    result.persistence = structuredClone(persistence);
+    session.lastActivityAt = this.#now();
+  }
+
+  #assertResultsSaved(session: Session): void {
+    if (
+      session.completedRounds.some(
+        (round) => round.persistence.status !== 'saved',
+      )
+    )
+      throw new DomainError(
+        'RESULTS_NOT_SAVED',
+        'Guarda los resultados pendientes en Nextcloud antes de continuar o finalizar la partida.',
+      );
   }
 
   joinSession(joinCode: string, nick: string, socketId: string): Participant {
@@ -411,6 +446,13 @@ export class SessionService {
     const now = this.#now();
     let deleted = 0;
     for (const session of this.#repository.values()) {
+      // No eliminar una sesión mientras su libro se está descargando o subiendo.
+      if (
+        session.completedRounds.some(
+          (round) => round.persistence.status === 'saving',
+        )
+      )
+        continue;
       const expired =
         session.state === 'FINISHED'
           ? now - (session.finishedAt ?? session.lastActivityAt) >=

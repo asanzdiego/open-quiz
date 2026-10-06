@@ -101,6 +101,13 @@ describe('Servicio de sesiones', () => {
       expect(updated.state).toBe(state);
       expect(updated.lastActivityAt).toBe(now);
       expect(updated.finishedAt).toBe(state === 'FINISHED' ? now : null);
+      if (state === 'QUESTION_RESULTS') {
+        service.setResultPersistence(
+          session.id,
+          updated.completedRounds.at(-1)!.questionId,
+          { status: 'saved', error: null },
+        );
+      }
     }
     expect(service.getSession(session.id).state).toBe('FINISHED');
   });
@@ -131,6 +138,11 @@ describe('Servicio de sesiones', () => {
     expect(service.getSession(session.id).state).toBe('QUESTION_ACTIVE');
     transition('QUESTION_RESULTS');
     expectDomainError(() => transition('LOBBY'), 'INVALID_TRANSITION');
+    service.setResultPersistence(
+      session.id,
+      service.getSession(session.id).completedRounds.at(-1)!.questionId,
+      { status: 'saved', error: null },
+    );
     transition('FINISHED');
     expectDomainError(
       () => transition('QUESTION_ACTIVE'),

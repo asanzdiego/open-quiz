@@ -85,6 +85,12 @@
           <p id="correct-answer"></p>
           <p id="question-statistics"></p>
         </div>
+        <p
+          id="workbook-save-status"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></p>
         <div id="podium-panel" hidden>
           <h3>Podio</h3>
           <ol id="podium" class="ranking"></ol>
@@ -94,6 +100,14 @@
           <ol id="ranking" class="ranking"></ol>
         </div>
         <div class="actions">
+          <button
+            id="retry-save-results"
+            class="button"
+            data-game-event="teacher:retry-save-results"
+            hidden
+          >
+            Reintentar guardado
+          </button>
           <button
             id="close-question"
             class="button"
@@ -119,7 +133,6 @@
             Finalizar partida
           </button>
         </div>
-        <p class="hint">Los resultados aún no se guardan en Nextcloud.</p>
       </section>
       <noscript><p>Activa JavaScript para crear una partida.</p></noscript>
     </main>

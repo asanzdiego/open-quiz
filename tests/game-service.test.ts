@@ -38,6 +38,13 @@ describe('Fase 6: dominio del juego', () => {
       option.id,
     );
   }
+  function markSaved(sessionId: string) {
+    const result = service.getSession(sessionId).completedRounds.at(-1)!;
+    service.setResultPersistence(sessionId, result.questionId, {
+      status: 'saved',
+      error: null,
+    });
+  }
 
   it('mantiene el orden de preguntas y una sola mezcla de opciones, sin datos de corrección activos', () => {
     const { session, ana } = setup();
@@ -61,6 +68,7 @@ describe('Fase 6: dominio del juego', () => {
       /correctOptionId|correctAnswer|isCorrect|teacherToken|reconnectToken|workbookReference|elapsedMs/,
     );
     service.closeQuestion(session.id, session.teacherToken);
+    markSaved(session.id);
     const second = service.startNextQuestion(session.id, session.teacherToken);
     expect(second.currentRound?.questionId).toBe(gameWorkbook.questions[1]!.id);
     expect(service.getGameSnapshot(session.id, ana.id).result).toBeNull();
@@ -150,6 +158,7 @@ describe('Fase 6: dominio del juego', () => {
       service.closeQuestion(session.id, session.teacherToken),
     ).toThrow();
     expect(service.getSession(session.id).completedRounds).toHaveLength(1);
+    markSaved(session.id);
     service.startNextQuestion(session.id, session.teacherToken);
     expect(() => answer(session.id, maria.id, 'maria-socket')).toThrow(
       expect.objectContaining({ code: 'PARTICIPANT_NOT_CONNECTED' }),
@@ -183,9 +192,11 @@ describe('Fase 6: dominio del juego', () => {
     now += 10000;
     answer(session.id, ana.id, 'ana-socket');
     service.closeQuestion(session.id, session.teacherToken);
+    markSaved(session.id);
     service.startNextQuestion(session.id, session.teacherToken);
     answer(session.id, ana.id, 'ana-socket');
     service.closeQuestion(session.id, session.teacherToken);
+    markSaved(session.id);
     expect(() =>
       service.startNextQuestion(session.id, session.teacherToken),
     ).toThrow(expect.objectContaining({ code: 'NO_MORE_QUESTIONS' }));

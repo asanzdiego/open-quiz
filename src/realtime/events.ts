@@ -8,6 +8,7 @@ import type {
   QuestionProgress,
   RankingEntry,
   StudentResult,
+  WorkbookSaveSnapshot,
 } from '../domain/session/game.ts';
 
 export interface CreateSessionPayload {
@@ -41,6 +42,7 @@ export interface ClientToServerEvents {
   'teacher:start-next-question': (payload: TeacherControlPayload) => void;
   'teacher:close-question': (payload: TeacherControlPayload) => void;
   'teacher:end-game': (payload: TeacherControlPayload) => void;
+  'teacher:retry-save-results': (payload: TeacherControlPayload) => void;
   'student:answer': (payload: StudentAnswerPayload) => void;
 }
 export type LobbyOperation = keyof ClientToServerEvents;
@@ -81,6 +83,7 @@ export interface ServerToClientEvents {
   'student:result': (payload: StudentResult) => void;
   'ranking:updated': (payload: RankingEntry[]) => void;
   'game:ended': (payload: GameEnded) => void;
+  'workbook:save-updated': (payload: WorkbookSaveSnapshot) => void;
   'app:error': (payload: AppError) => void;
 }
 export type Membership =

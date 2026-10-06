@@ -10,11 +10,19 @@ export function createGameView(role, socket, getCredentials) {
   let synced = false;
   let clockOffset = 0;
   let countdown;
+  let workbookSave = null;
 
   function updateButtons() {
     const disabled = !socket.connected || !synced || pending;
-    for (const button of document.querySelectorAll('[data-game-event]'))
-      button.disabled = disabled;
+    for (const button of document.querySelectorAll('[data-game-event]')) {
+      const needsSave =
+        state === 'QUESTION_RESULTS' &&
+        ['teacher:start-next-question', 'teacher:end-game'].includes(
+          button.dataset.gameEvent,
+        );
+      button.disabled =
+        disabled || (needsSave && workbookSave?.status !== 'saved');
+    }
     for (const button of element('answer-options').children)
       button.disabled =
         disabled ||
@@ -45,6 +53,24 @@ export function createGameView(role, socket, getCredentials) {
     if (role !== 'student' || !own) return;
     element('student-result').textContent =
       `${own.answered ? (own.isCorrect ? 'Correcto' : 'Incorrecto') : 'Sin respuesta'} · ${own.points} puntos en esta pregunta · Total: ${own.totalPoints} · Puesto: ${own.position}`;
+  }
+  function renderWorkbookSave() {
+    if (role !== 'teacher') return;
+    const status = element('workbook-save-status');
+    status.hidden = !workbookSave && state !== 'FINISHED';
+    status.className = workbookSave?.status === 'error' ? 'error' : '';
+    status.textContent = !workbookSave
+      ? state === 'FINISHED'
+        ? 'No se han cerrado preguntas; no hay resultados para guardar.'
+        : ''
+      : workbookSave.status === 'saved'
+        ? state === 'FINISHED'
+          ? 'Los resultados se han guardado en Nextcloud.'
+          : `Resultados guardados en Nextcloud: ${workbookSave.worksheetName}.`
+        : workbookSave.status === 'error'
+          ? `${workbookSave.error.message} La clasificación se conserva. Reintenta el guardado para continuar.`
+          : `Guardando ${workbookSave.worksheetName} en Nextcloud…`;
+    element('retry-save-results').hidden = workbookSave?.status !== 'error';
   }
   function render() {
     clearInterval(countdown);
@@ -135,6 +161,7 @@ export function createGameView(role, socket, getCredentials) {
       tick();
       countdown = setInterval(tick, 250);
     }
+    renderWorkbookSave();
     updateButtons();
   }
 
@@ -157,6 +184,7 @@ export function createGameView(role, socket, getCredentials) {
     participantId = snapshot.self?.participantId ?? null;
     hasAnswered = snapshot.self?.hasAnswered ?? false;
     clockOffset = snapshot.serverNow - Date.now();
+    workbookSave = snapshot.workbookSave;
     render();
     if (snapshot.progress) renderProgress(snapshot.progress);
     renderSelf(snapshot.self?.result);
@@ -167,6 +195,7 @@ export function createGameView(role, socket, getCredentials) {
     result = null;
     pending = false;
     hasAnswered = false;
+    workbookSave = null;
     clockOffset = payload.startedAt - Date.now();
     render();
   });
@@ -187,6 +216,13 @@ export function createGameView(role, socket, getCredentials) {
     pending = false;
     state = 'QUESTION_RESULTS';
     result = payload;
+    if (role === 'teacher')
+      workbookSave = {
+        questionNumber: payload.questionNumber,
+        worksheetName: `P${String(payload.questionNumber).padStart(2, '0')}`,
+        status: 'pending',
+        error: null,
+      };
     render();
   });
   socket.on('ranking:updated', (payload) => {
@@ -194,6 +230,12 @@ export function createGameView(role, socket, getCredentials) {
     renderRanking(ranking, 'ranking');
   });
   socket.on('student:result', renderSelf);
+  socket.on('workbook:save-updated', (payload) => {
+    workbookSave = payload;
+    if (payload.status !== 'saving') pending = false;
+    renderWorkbookSave();
+    updateButtons();
+  });
   socket.on('game:ended', (payload) => {
     pending = false;
     state = 'FINISHED';

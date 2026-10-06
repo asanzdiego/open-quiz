@@ -2,7 +2,7 @@
 
 Aplicación educativa de cuestionarios en tiempo real, con frontend sencillo y sin cuentas ni base de datos.
 
-**Estado actual: Fases 1–6 terminadas.** El profesor crea una partida desde un XLSX de Nextcloud y controla las preguntas. Los alumnos entran con código y nick, responden en tiempo real y ven sus puntos, clasificación y podio. El servidor controla tiempo y puntuación; profesor y alumnos recuperan el estado actual al reconectar. Los resultados se conservan en memoria. La escritura en el XLSX corresponde a la Fase 7 y todavía no se realiza.
+**Estado actual: Fases 1–7 terminadas.** El profesor crea una partida desde un XLSX de Nextcloud y controla las preguntas. Los alumnos entran con código y nick, responden en tiempo real y ven sus puntos, clasificación y podio. El servidor controla tiempo y puntuación; profesor y alumnos recuperan el estado actual al reconectar. Cada pregunta cerrada se guarda en el mismo XLSX como `P01`, `P02`, etc., con bloqueo de escritura y reintento manual ante errores.
 
 ## Requisitos e instalación
 
@@ -67,7 +67,7 @@ Configura `NEXTCLOUD_WEBDAV_URL`, `NEXTCLOUD_USERNAME` y `NEXTCLOUD_APP_PASSWORD
 
 `WorkbookStorage` define el contrato `downloadWorkbook(reference): Promise<Buffer>` y `uploadWorkbook(reference, data): Promise<void>`. `NextcloudWebDavWorkbookStorage` lo implementa mediante el cliente mantenido [`webdav`](https://github.com/perry-mitchell/webdav-client). La referencia es una ruta literal relativa a la raíz configurada, por ejemplo `Quiz/Matemáticas 1.xlsx`, con barra inicial opcional; no es una URL pública ni una ruta del disco local. Escribe espacios, tildes y otros caracteres tal como aparecen en Nextcloud, sin codificarlos como URL. Solo se admite extensión `.xlsx`, sin distinguir mayúsculas. Se rechazan rutas vacías, segmentos `.` o `..`, barras duplicadas, barras invertidas, dos puntos, caracteres de control y rutas de más de 1024 caracteres.
 
-Cada descarga obtiene el contenido remoto actual y devuelve un `Buffer`; no se usa disco ni una copia persistente. La subida recibe un `Buffer` no vacío y **sustituye el contenido del fichero indicado**, con el tipo MIME de XLSX. No crea carpetas ni modifica hojas de Excel; la validación del contenido sigue correspondiendo a `importQuestions`. La escritura de pestañas de resultados, el lock por sesión y los reintentos del profesor se implementarán en la Fase 7.
+Cada descarga obtiene el contenido remoto actual y devuelve un `Buffer`; no se usa disco ni una copia persistente. La subida recibe un `Buffer` no vacío y **sustituye el contenido del fichero indicado**, con el tipo MIME de XLSX. El adaptador no crea carpetas ni interpreta las hojas de Excel: la importación corresponde a `importQuestions` y la escritura de pestañas a `writeQuestionResults`, coordinada por `WorkbookResultsService`.
 
 `WorkbookStorageError` proporciona códigos y mensajes comprensibles para autenticación, permisos, fichero inexistente, carpeta inexistente, bloqueo, cuota, timeout y fallos generales de lectura/escritura. No conserva la respuesta ni el error original del cliente WebDAV, que pueden contener información sensible. No hay reintentos automáticos de subida. Para las pruebas de servicios, `tests/helpers/in-memory-workbook-storage.ts` ofrece un mock intercambiable que copia los Buffers y aísla los libros.
 
@@ -113,9 +113,9 @@ LOBBY → FINISHED
 QUESTION_RESULTS → FINISHED
 ```
 
-Una partida terminada no se reabre. Para terminar desde una pregunta activa, primero debe cerrarse y calcularse sus resultados. `transitionSession` delega en los métodos de juego para mantener esas reglas; no cambia el estado saltándose el cálculo de puntos. Tras la última pregunta, el profesor pulsa **Finalizar partida**. También puede finalizar desde el lobby o desde resultados aunque queden preguntas.
+Una partida terminada no se reabre. Para terminar desde una pregunta activa, primero debe cerrarse, calcularse sus resultados y guardarlos. `transitionSession` delega en los métodos de juego para mantener esas reglas; no cambia el estado saltándose el cálculo de puntos ni el guardado pendiente. Tras la última pregunta, el profesor pulsa **Finalizar partida**. También puede finalizar desde el lobby o desde resultados aunque queden preguntas, siempre que todas las rondas cerradas estén guardadas.
 
-`cleanupExpired({ sessionTtlMs, finishedSessionTtlMs })` elimina sesiones sin actividad al alcanzar el primer TTL y sesiones terminadas al alcanzar el segundo, medido desde `finishedAt`. Elimina también el índice de código. Ambos límites son enteros positivos en milisegundos. La aplicación lo invoca cada minuto y cancela el temporizador al cerrar el servidor. La sesión conserva la referencia del libro y las preguntas importadas, nunca una copia del XLSX como fuente de verdad para futuras escrituras.
+`cleanupExpired({ sessionTtlMs, finishedSessionTtlMs })` elimina sesiones sin actividad al alcanzar el primer TTL y sesiones terminadas al alcanzar el segundo, medido desde `finishedAt`. Elimina también el índice de código. Ambos límites son enteros positivos en milisegundos. La aplicación lo invoca cada minuto y cancela el temporizador al cerrar el servidor. No elimina una sesión mientras tenga un guardado en curso; cada cambio de estado del guardado renueva su actividad. Una sesión con guardado fallido sigue sujeta al TTL. La sesión conserva la referencia del libro y las preguntas importadas, nunca una copia del XLSX como fuente de verdad para futuras escrituras.
 
 `calculatePoints({ isCorrect, elapsedMs, durationMs, maxPoints })` aplica la fórmula lineal, redondea a entero y limita el resultado a `[0, maxPoints]`. El máximo predeterminado es 1000. Una respuesta incorrecta o recibida al alcanzar o superar la duración obtiene cero puntos. Los tiempos negativos se limitan a cero; las duraciones no positivas, los números no finitos y los máximos inválidos generan un error. Los tiempos del dominio se expresan en milisegundos y proceden del reloj del servidor.
 
@@ -146,20 +146,24 @@ Los eventos de juego añaden este contrato:
 | `teacher:start-next-question` | `{ sessionId, teacherToken }`    |
 | `teacher:close-question`      | `{ sessionId, teacherToken }`    |
 | `teacher:end-game`            | `{ sessionId, teacherToken }`    |
+| `teacher:retry-save-results`  | `{ sessionId, teacherToken }`    |
 | `student:answer`              | `{ questionId, answerOptionId }` |
 
 Los controles exigen tanto pertenencia al rol profesor en esa sesión como el token secreto. Para responder se utiliza la identidad del socket incorporado; el cliente no elige otro participante ni otra sesión.
 
-| Servidor → cliente  | Alcance y contenido                                                                                                                                                                                                                                                                                  |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `game:updated`      | Privado tras crear, entrar o reconectar: `{ state, question, result, ranking, podium, progress, self, serverNow }`. `question` incluye opciones y plazo, `result` solo existe tras cerrar, `progress` solo llega al profesor y `self` solo contiene la identidad y resultado del alumno propietario. |
-| `question:started`  | Room de la sesión: `{ questionId, questionNumber, questionCount, text, options, startedAt, endsAt, durationMs }`; cada opción es `{ id, text }`.                                                                                                                                                     |
-| `question:progress` | Solo profesor: `{ questionId, answeredCount, participantCount }`.                                                                                                                                                                                                                                    |
-| `answer:accepted`   | Solo alumno que responde: `{ questionId, answerOptionId }`, sin corrección ni puntuación.                                                                                                                                                                                                            |
-| `question:ended`    | Room de la sesión: `{ questionId, questionNumber, correctOptionId, correctAnswer, answeredCount, correctCount, participantCount, hasNextQuestion }`.                                                                                                                                                 |
-| `student:result`    | Solo propietario: `{ participantId, nick, answered, isCorrect, elapsedMs, points, totalPoints, position }`.                                                                                                                                                                                          |
-| `ranking:updated`   | Room de la sesión: entradas `{ participantId, nick, totalPoints, position }`.                                                                                                                                                                                                                        |
-| `game:ended`        | Room de la sesión: `{ ranking, podium }`; podio con hasta tres entradas.                                                                                                                                                                                                                             |
+`teacher:retry-save-results` guarda la última ronda cerrada. El servidor obtiene sus datos de memoria, sin aceptar filas, tiempos ni puntos del navegador. Un resultado ya confirmado no se sube otra vez. Si un guardado está en curso, el reintento comparte ese mismo intento.
+
+| Servidor → cliente      | Alcance y contenido                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `game:updated`          | Privado tras crear, entrar o reconectar: `{ state, question, result, ranking, podium, progress, self, serverNow, workbookSave }`. `question` incluye opciones y plazo, `result` solo existe tras cerrar, `progress` solo llega al profesor y `self` solo contiene la identidad y resultado del alumno propietario. `workbookSave` solo contiene estado de guardado para el profesor; es `null` para alumnos. |
+| `question:started`      | Room de la sesión: `{ questionId, questionNumber, questionCount, text, options, startedAt, endsAt, durationMs }`; cada opción es `{ id, text }`.                                                                                                                                                                                                                                                             |
+| `question:progress`     | Solo profesor: `{ questionId, answeredCount, participantCount }`.                                                                                                                                                                                                                                                                                                                                            |
+| `answer:accepted`       | Solo alumno que responde: `{ questionId, answerOptionId }`, sin corrección ni puntuación.                                                                                                                                                                                                                                                                                                                    |
+| `question:ended`        | Room de la sesión: `{ questionId, questionNumber, correctOptionId, correctAnswer, answeredCount, correctCount, participantCount, hasNextQuestion }`.                                                                                                                                                                                                                                                         |
+| `student:result`        | Solo propietario: `{ participantId, nick, answered, isCorrect, elapsedMs, points, totalPoints, position }`.                                                                                                                                                                                                                                                                                                  |
+| `ranking:updated`       | Room de la sesión: entradas `{ participantId, nick, totalPoints, position }`.                                                                                                                                                                                                                                                                                                                                |
+| `game:ended`            | Room de la sesión: `{ ranking, podium }`; podio con hasta tres entradas.                                                                                                                                                                                                                                                                                                                                     |
+| `workbook:save-updated` | Solo profesor de esa sesión: `{ questionNumber, worksheetName, status, error }`. `status` es `saving`, `saved` o `error`; `error` es `null` o `{ code, message }`, sin datos del fichero ni credenciales.                                                                                                                                                                                                    |
 
 No se habilita CORS para otros orígenes. El handshake rechaza un `Origin` cuyo host no coincida con el servidor, también para WebSocket; los clientes de pruebas sin `Origin` pueden conectar. El límite de payload es 16 KiB. La creación, entrada y reconexión admiten 120 operaciones y cinco intentos de creación por minuto e IP vista por el servidor, compartidos entre sockets. Los controles del juego y las respuestas tienen un límite separado de 120 operaciones por minuto y socket; las respuestas de 40 alumnos bajo la misma IP no consumen un contador común. No se confía en `X-Forwarded-For`; detrás de un proxy varios usuarios pueden compartir los límites de entrada. Los logs incluyen eventos e identificadores internos, sin tokens, credenciales, referencias ni detalles de errores inesperados.
 
@@ -183,15 +187,44 @@ Con un XLSX válido en Nextcloud y el backend configurado, crea una partida y en
 1. El profesor pulsa **Iniciar**. Todos los alumnos reciben la misma pregunta y las mismas cuatro opciones, mezcladas una sola vez en el servidor. Los UUID de las opciones no indican cuál es correcta. El orden de preguntas sigue el Excel.
 2. Cada alumno pulsa una opción. Los botones se bloquean y aparece **Respuesta enviada**, sin revelar acierto ni puntos. El servidor conserva la primera respuesta válida; un reenvío devuelve la confirmación de esa respuesta sin cambiarla. Rechaza opciones desconocidas, preguntas distintas, conexiones sustituidas y respuestas fuera de plazo. No acepta tiempos enviados por el navegador.
 3. Al agotarse el tiempo, o al pulsar **Cerrar pregunta**, el servidor calcula los puntos y totales una sola vez. Se muestran respuesta correcta, número de respuestas y aciertos y clasificación. Cada alumno recibe privadamente su resultado, puntos, total y puesto. Quien no responde, incluso si está desconectado, obtiene cero puntos y un tiempo igual a la duración máxima en milisegundos.
-4. El profesor pulsa **Siguiente pregunta**. Nunca se avanza automáticamente, aunque todos hayan respondido. Al finalizar, pulsa **Finalizar partida** para mostrar el podio de hasta tres participantes y la clasificación completa. Los empates se resuelven por orden de incorporación a la partida; los puestos son consecutivos.
+4. Al cerrar, se inicia el guardado y el profesor ve su estado. **Siguiente pregunta** y **Finalizar partida** se habilitan al confirmar la subida. Si falla, pulsa **Reintentar guardado**; se conserva el ranking. Nunca se avanza automáticamente, aunque todos hayan respondido. Al finalizar, pulsa **Finalizar partida** para mostrar el podio de hasta tres participantes y la clasificación completa. Los empates se resuelven por orden de incorporación a la partida; los puestos son consecutivos.
 
 El contador del navegador es visual y se sincroniza con el reloj del servidor al recibir una pregunta o recuperar la sesión. El plazo se comprueba también al recibir una respuesta, aunque el callback del temporizador se haya retrasado. Al reconectar se recuperan pregunta, opciones en el mismo orden, plazo original, respuesta ya enviada, clasificación y resultado propio, según el estado de la partida. El temporizador sigue funcionando sin el profesor conectado.
 
-La creación descarga el libro; el juego no lo modifica. Los resultados de todas las preguntas cerradas permanecen en `completedRounds` de su sesión hasta que expire o se reinicie el proceso. La escritura de `P01`, `P02`, etc., con bloqueo y reintento, queda pendiente de la Fase 7.
+Los resultados de todas las preguntas cerradas permanecen en `completedRounds` de su sesión hasta que expire o se reinicie el proceso. Cada ronda incluye `persistence`, con estado `pending`, `saving`, `saved` o `error` y un error seguro cuando corresponda. El profesor recupera ese estado al reconectar, sin repetir automáticamente una escritura fallida.
 
 ### Prueba manual del juego
 
-Usa el fixture `valid-header.xlsx` en Nextcloud y tres móviles o perfiles distintos. Inicia desde el profesor y comprueba que todos reciben opciones idénticas. Haz que un alumno responda correctamente, otro incorrectamente y el tercero no responda. Recarga el primero antes del cierre: debe conservar el bloqueo de respuesta. Espera el cierre por tiempo y comprueba puntos, clasificación y que la segunda pregunta aún no se ha iniciado. Recarga el profesor, pulsa **Siguiente pregunta**, responde y ciérrala manualmente. Finaliza y comprueba podio y puesto de cada alumno, también al recargar. En esta fase el fichero de Nextcloud debe conservarse sin pestañas nuevas.
+Usa una copia nueva del fixture `valid-header.xlsx` en Nextcloud y tres móviles o perfiles distintos. Inicia desde el profesor y comprueba que todos reciben opciones idénticas. Haz que un alumno responda correctamente, otro incorrectamente y el tercero no responda. Recarga el primero antes del cierre: debe conservar el bloqueo de respuesta. Espera el cierre por tiempo y comprueba puntos, clasificación y que la segunda pregunta aún no se ha iniciado. El profesor debe ver **Resultados guardados en Nextcloud: P01**. Recarga el profesor, pulsa **Siguiente pregunta**, responde y ciérrala manualmente. Finaliza y comprueba podio y puesto de cada alumno, también al recargar.
+
+### Guardado de resultados en el mismo XLSX
+
+Al cerrar una pregunta, sea por tiempo, por el profesor o al detectar una respuesta fuera de plazo, se calculan los puntos una sola vez y se publica el ranking inmediatamente. El guardado ejecuta, bajo un lock por sesión: descargar el libro actual, abrirlo con ExcelJS, añadir `Pxx`, serializarlo y subirlo a la misma referencia. No se escribe al recibir respuestas individuales. Solicitudes simultáneas de la misma sesión comparten una promesa; sesiones con la misma referencia se serializan dentro de esta instancia. Libros diferentes pueden guardarse simultáneamente. Los locks se liberan tanto al guardar como al fallar.
+
+Cada pestaña tiene estas cinco columnas:
+
+| Nick  | Acertada | Tiempo | Puntos pregunta | Puntos totales |
+| ----- | -------- | ------ | --------------- | -------------- |
+| Ana   | Sí       | 5000   | 750             | 750            |
+| Luis  | No       | 3000   | 0               | 0              |
+| María | No       | 20000  | 0               | 0              |
+
+`Tiempo` es un entero en **milisegundos**, obtenido por el servidor. Cada participante incorporado al empezar la pregunta tiene una fila, aunque esté desconectado al cerrar. Quien no responde tiene `No`, duración máxima y cero puntos de pregunta. El total corresponde al acumulado al cerrar esa ronda. Los nicks se escriben como texto literal; un nick que empiece con `=` no se convierte en fórmula.
+
+Se conservan las hojas existentes. `P01` corresponde a la primera pregunta, `P02` a la segunda y así sucesivamente; a partir de 100 se usa `P100`. Si ya existe la pestaña, incluso con un nombre como `p01`, se devuelve `RESULT_SHEET_EXISTS` sin subir ni sobrescribir. Para reutilizar un cuestionario, utiliza una copia sin pestañas de resultados o renombra las anteriores.
+
+Un fallo de descarga, lectura XLSX o subida deja la ronda en `QUESTION_RESULTS`, con ranking y filas intactos. El profesor recibe un mensaje y el botón **Reintentar guardado**; no puede avanzar ni finalizar hasta confirmar el guardado. Los reintentos descargan de nuevo el fichero y no recalculan puntos. Si una subida se completó en Nextcloud pero se perdió su confirmación, el reintento detectará `Pxx` existente y requerirá resolver el conflicto explícitamente.
+
+La nueva descarga conserva cambios realizados antes de cada intento. No hay comparación de ETag ni bloqueo de editores externos entre descarga y subida; evita editar el mismo libro durante ese intervalo. Los locks solo existen en esta instancia del servidor. Reiniciar el proceso o dejar expirar la sesión elimina resultados pendientes de su memoria.
+
+### Prueba manual del guardado y reintento
+
+1. Completa la prueba de juego anterior y descarga el XLSX desde Nextcloud. Debe conservar `Preguntas` y contener `P01` y `P02` con las cinco cabeceras, una fila por alumno, tiempos en milisegundos y totales acumulados.
+2. Con una copia nueva, edita otra hoja del libro después de crear la partida y antes del cierre. Comprueba que esa edición sigue en el XLSX tras guardar.
+3. Simula un fallo de subida quitando temporalmente el permiso de escritura de la carpeta al usuario de aplicación. Cierra una pregunta: el ranking debe seguir visible y el profesor debe recibir un error. Recarga su pestaña y comprueba que conserva resultados y opción de reintento. Restablece el permiso, pulsa **Reintentar guardado** y verifica que se crea una sola `P01` y no se suman puntos otra vez.
+4. Repite con un libro que ya contenga `P01`: debe aparecer el conflicto y no alterarse esa hoja. Renómbrala en Nextcloud, reintenta y comprueba el guardado.
+
+Las pruebas automáticas cubren estos escenarios con almacenamiento simulado, incluidos cierre automático, reconexión durante la escritura, permisos, errores sin secretos, locks y 40 alumnos. La prueba manual requiere una instancia real de Nextcloud configurada.
 
 ## Formato del Excel e importación
 
@@ -214,7 +247,7 @@ La primera fila con contenido puede ser una cabecera con los cinco títulos ante
 - Se mantiene el orden de las preguntas y de las tres respuestas incorrectas. Cada pregunta recibe un UUID y contiene `text`, `correctAnswer` e `incorrectAnswers`. Este modelo es exclusivo del backend: incluye la respuesta correcta y no debe enviarse directamente durante una pregunta activa. Al abrir la pregunta, el servidor genera y baraja opciones con UUID independientes del modelo importado.
 - Un libro inválido o una fila inválida rechaza toda la importación. `ExcelImportError` proporciona un código, un mensaje comprensible y, cuando corresponde, el nombre de hoja y la dirección de celda, sin incluir su contenido en el error.
 
-El importador no lee archivos locales ni modifica el `Buffer`. Los archivos locales solo se utilizan en las pruebas. El adaptador WebDAV obtiene los libros desde Nextcloud; la escritura de resultados en las pestañas `P01`, `P02`, etc. corresponde a la Fase 7.
+El importador no lee archivos locales ni modifica el `Buffer`. Los archivos locales solo se utilizan en las pruebas. El adaptador WebDAV obtiene los libros desde Nextcloud y el servicio de resultados añade las pestañas `P01`, `P02`, etc.
 
 ## Docker
 
@@ -239,12 +272,15 @@ src/
   excel/
     import-questions.ts    Lectura y validación XLSX desde Buffer
     excel-import-error.ts  Errores de importación con hoja y celda
+    write-question-results.ts  Añade Pxx desde un resultado cerrado sin sobrescribir
+    excel-results-error.ts     Errores seguros de lectura, conflicto y serialización
   services/
     session-service.ts  Sesiones, participantes, preguntas, respuestas, puntuación y limpieza
     load-session-workbook.ts   Descarga y validación antes de crear la sesión
     workbook-reference.ts      Validación compartida de rutas relativas XLSX
     workbook-storage.ts        Contrato de descarga/subida en memoria
     workbook-storage-error.ts  Errores seguros de almacenamiento
+    workbook-results-service.ts Guardado, estado, locks por sesión/libro y reintentos
   nextcloud/
     nextcloud-webdav-workbook-storage.ts  Implementación WebDAV autenticada
   realtime/
@@ -276,6 +312,8 @@ tests/
   session-service.test.ts    Sesiones, participantes, estados, reconexión y TTL
   scoring.test.ts            Límites y fórmula de puntuación
   excel-import.test.ts       Lectura real de XLSX, cabeceras y filas inválidas
+  excel-results.test.ts      Pxx, columnas, tiempos, texto literal y conservación del libro
+  workbook-results-service.test.ts Guardado, concurrencia, conflictos, fallos y recuperación
   fixtures/excel/            Libros de prueba y generador reproducible
   nextcloud-config.test.ts              Validación de conexión y credenciales
   nextcloud-storage.test.ts             Adaptador con cliente simulado

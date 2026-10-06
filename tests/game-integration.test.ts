@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
+import ExcelJS from 'exceljs';
 import { io as connect, type Socket } from 'socket.io-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApplication } from '../src/app.ts';
@@ -13,6 +14,7 @@ import type {
   TeacherControlPayload,
 } from '../src/realtime/events.ts';
 import { SessionService } from '../src/services/session-service.ts';
+import { WorkbookStorageError } from '../src/services/workbook-storage-error.ts';
 import { InMemoryWorkbookStorage } from './helpers/in-memory-workbook-storage.ts';
 
 type Client = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -36,7 +38,26 @@ function nextEvent<K extends keyof ServerToClientEvents>(
   });
 }
 
-describe('Fase 6: juego completo por Socket.IO', () => {
+function nextSave(
+  client: Client,
+  status: 'saved' | 'error' = 'saved',
+): Promise<Payload<'workbook:save-updated'>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      client.off('workbook:save-updated', listener);
+      reject(new Error(`No se ha recibido guardado ${status}.`));
+    }, 2500);
+    const listener = (payload: Payload<'workbook:save-updated'>) => {
+      if (payload.status !== status) return;
+      clearTimeout(timer);
+      client.off('workbook:save-updated', listener);
+      resolve(payload);
+    };
+    client.on('workbook:save-updated', listener);
+  });
+}
+
+describe('Fases 6–7: juego y guardado por Socket.IO', () => {
   let application: ReturnType<typeof createApplication>;
   let sessions: SessionService;
   let storage: InMemoryWorkbookStorage;
@@ -128,7 +149,9 @@ describe('Fase 6: juego completo por Socket.IO', () => {
   }
   async function close(t: Awaited<ReturnType<typeof teacher>>) {
     const closed = nextEvent(t.socket, 'question:ended');
+    const saved = nextSave(t.socket);
     t.socket.emit('teacher:close-question', controls(t.session));
+    await saved;
     return closed;
   }
   async function reconnect(s: StudentSession) {
@@ -144,7 +167,7 @@ describe('Fase 6: juego completo por Socket.IO', () => {
     return { socket, snapshot: await synced };
   }
 
-  it('crea, incorpora tres alumnos, pregunta, puntúa, avanza y termina sin modificar el XLSX', async () => {
+  it('crea, incorpora tres alumnos, puntúa, guarda P01 y P02 y termina con podio', async () => {
     const upload = vi.spyOn(storage, 'uploadWorkbook');
     const t = await teacher();
     const a = await student(t.session);
@@ -178,6 +201,7 @@ describe('Fase 6: juego completo por Socket.IO', () => {
       answeredCount: 1,
       participantCount: 3,
     });
+    expect(upload).not.toHaveBeenCalled();
     expect(JSON.stringify(privateEvents)).not.toMatch(
       /isCorrect|correctOptionId|correctAnswer|elapsedMs|teacherToken|reconnectToken/,
     );
@@ -239,7 +263,49 @@ describe('Fase 6: juego completo por Socket.IO', () => {
     expect(
       sessions.getSession(t.session.sessionId).completedRounds,
     ).toHaveLength(2);
-    expect(upload).not.toHaveBeenCalled();
+    expect(upload).toHaveBeenCalledTimes(2);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(
+      Uint8Array.from(await storage.downloadWorkbook('Quiz/prueba.xlsx'))
+        .buffer,
+    );
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
+      'Preguntas',
+      'P01',
+      'P02',
+    ]);
+    expect(workbook.getWorksheet('P01')?.getRow(2).values).toEqual([
+      undefined,
+      'Ana',
+      'Sí',
+      5000,
+      750,
+      750,
+    ]);
+    expect(workbook.getWorksheet('P01')?.getRow(3).values).toEqual([
+      undefined,
+      'Luis',
+      'No',
+      5000,
+      0,
+      0,
+    ]);
+    expect(workbook.getWorksheet('P01')?.getRow(4).values).toEqual([
+      undefined,
+      'María',
+      'No',
+      20000,
+      0,
+      0,
+    ]);
+    expect(workbook.getWorksheet('P02')?.getRow(2).values).toEqual([
+      undefined,
+      'Ana',
+      'Sí',
+      0,
+      1000,
+      1750,
+    ]);
     expect(JSON.stringify(logger.mock.calls)).not.toContain(
       t.session.teacherToken,
     );
@@ -251,6 +317,7 @@ describe('Fase 6: juego completo por Socket.IO', () => {
         'question_started',
         'question_closed',
         'session_finished',
+        'workbook_updated',
       ]),
     );
   });
@@ -320,6 +387,7 @@ describe('Fase 6: juego completo por Socket.IO', () => {
     const a = await student(t.session);
     const ended = nextEvent(t.socket, 'question:ended');
     const own = nextEvent(a.socket, 'student:result');
+    const saved = nextSave(t.socket);
     const question = await start(t);
     expect(question.durationMs).toBe(1000);
     expect(await ended).toMatchObject({ questionNumber: 1, answeredCount: 0 });
@@ -327,6 +395,10 @@ describe('Fase 6: juego completo por Socket.IO', () => {
       answered: false,
       elapsedMs: 1000,
       points: 0,
+    });
+    expect(await saved).toMatchObject({
+      worksheetName: 'P01',
+      status: 'saved',
     });
     const newTeacher = await client();
     const synced = nextEvent(newTeacher, 'game:updated');
@@ -474,6 +546,184 @@ describe('Fase 6: juego completo por Socket.IO', () => {
     const restored = await reconnect(b.participant); // Barrera de eventos, sin sleeps.
     expect(restored.snapshot.state).toBe('LOBBY');
     for (const observer of observers) expect(observer).not.toHaveBeenCalled();
+  });
+
+  it('conserva puntos al fallar la subida, restaura el error al reconectar y permite reintentar sin duplicarlos', async () => {
+    const t = await teacher();
+    const a = await student(t.session);
+    const privateSave = vi.fn();
+    a.socket.on('workbook:save-updated', privateSave);
+    const question = await start(t);
+    now += 5000;
+    const accepted = nextEvent(a.socket, 'answer:accepted');
+    a.socket.emit('student:answer', {
+      questionId: question.questionId,
+      answerOptionId: question.options.find((option) => option.text === '4')!
+        .id,
+    });
+    await accepted;
+    const upload = vi
+      .spyOn(storage, 'uploadWorkbook')
+      .mockRejectedValueOnce(new WorkbookStorageError('UPLOAD_FAILED'));
+    const failed = nextSave(t.socket, 'error');
+    const ended = nextEvent(t.socket, 'question:ended');
+    const ranking = nextEvent(t.socket, 'ranking:updated');
+    const own = nextEvent(a.socket, 'student:result');
+    t.socket.emit('teacher:close-question', controls(t.session));
+    await ended;
+    expect((await ranking)[0]?.totalPoints).toBe(750);
+    expect(await own).toMatchObject({ points: 750, totalPoints: 750 });
+    expect(await failed).toMatchObject({
+      status: 'error',
+      error: { code: 'UPLOAD_FAILED' },
+    });
+    for (const event of [
+      'teacher:start-next-question',
+      'teacher:end-game',
+    ] as const) {
+      const error = nextEvent(t.socket, 'app:error');
+      t.socket.emit(event, controls(t.session));
+      expect(await error).toMatchObject({ code: 'RESULTS_NOT_SAVED' });
+    }
+    const replacement = await client();
+    const synced = nextEvent(replacement, 'game:updated');
+    replacement.emit('teacher:reconnect', controls(t.session));
+    expect(await synced).toMatchObject({
+      state: 'QUESTION_RESULTS',
+      workbookSave: {
+        status: 'error',
+        worksheetName: 'P01',
+        error: { code: 'UPLOAD_FAILED' },
+      },
+    });
+    const saved = nextSave(replacement);
+    replacement.emit('teacher:retry-save-results', controls(t.session));
+    expect(await saved).toMatchObject({ status: 'saved', error: null });
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(
+      sessions.getSession(t.session.sessionId).completedRounds,
+    ).toHaveLength(1);
+    expect(
+      sessions.getGameSnapshot(t.session.sessionId).ranking[0]?.totalPoints,
+    ).toBe(750);
+    const restored = await reconnect(a.participant);
+    expect(restored.snapshot).toMatchObject({
+      workbookSave: null,
+      self: { result: { totalPoints: 750 } },
+    });
+    expect(privateSave).not.toHaveBeenCalled();
+    await start(
+      { socket: replacement, session: t.session },
+      'teacher:start-next-question',
+    );
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(
+      t.session.teacherToken,
+    );
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(
+      a.participant.reconnectToken,
+    );
+  });
+
+  it('valida los reintentos, exige rol y token y no vuelve a subir un guardado confirmado', async () => {
+    const t = await teacher();
+    const a = await student(t.session);
+    const outsider = await client();
+    const upload = vi.spyOn(storage, 'uploadWorkbook');
+    for (const socket of [a.socket, outsider]) {
+      const error = nextEvent(socket, 'app:error');
+      socket.emit('teacher:retry-save-results', controls(t.session));
+      expect(await error).toMatchObject({ code: 'FORBIDDEN' });
+    }
+    let error = nextEvent(t.socket, 'app:error');
+    t.socket.emit('teacher:retry-save-results', {
+      ...controls(t.session),
+      teacherToken: a.participant.reconnectToken,
+    });
+    expect(await error).toMatchObject({ code: 'INVALID_TEACHER_TOKEN' });
+    error = nextEvent(t.socket, 'app:error');
+    t.socket.emit('teacher:retry-save-results', {
+      ...controls(t.session),
+      questionNumber: 1,
+    } as TeacherControlPayload);
+    expect(await error).toMatchObject({ code: 'INVALID_PAYLOAD' });
+    error = nextEvent(t.socket, 'app:error');
+    t.socket.emit('teacher:retry-save-results', controls(t.session));
+    expect(await error).toMatchObject({ code: 'RESULT_NOT_FOUND' });
+    expect(upload).not.toHaveBeenCalled();
+    await start(t);
+    await close(t);
+    const saved = nextSave(t.socket);
+    t.socket.emit('teacher:retry-save-results', controls(t.session));
+    await saved;
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
+
+  it('restaura un guardado en curso y comparte el intento cuando el profesor reintenta desde otra conexión', async () => {
+    const t = await teacher();
+    await student(t.session);
+    await start(t);
+    const originalUpload = storage.uploadWorkbook.bind(storage);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const upload = vi
+      .spyOn(storage, 'uploadWorkbook')
+      .mockImplementation(async (reference, data) => {
+        await gate;
+        await originalUpload(reference, data);
+      });
+    const ended = nextEvent(t.socket, 'question:ended');
+    t.socket.emit('teacher:close-question', controls(t.session));
+    await ended;
+    const replacement = await client();
+    const synced = nextEvent(replacement, 'game:updated');
+    replacement.emit('teacher:reconnect', controls(t.session));
+    expect(await synced).toMatchObject({
+      state: 'QUESTION_RESULTS',
+      workbookSave: { status: 'saving' },
+    });
+    const blocked = nextEvent(replacement, 'app:error');
+    replacement.emit('teacher:start-next-question', controls(t.session));
+    expect(await blocked).toMatchObject({ code: 'RESULTS_NOT_SAVED' });
+    const saved = nextSave(replacement);
+    const duplicate = nextEvent(replacement, 'app:error');
+    replacement.emit('teacher:retry-save-results', controls(t.session));
+    replacement.emit('teacher:retry-save-results', controls(t.session));
+    expect(await duplicate).toMatchObject({ code: 'OPERATION_IN_PROGRESS' });
+    release();
+    expect(await saved).toMatchObject({ status: 'saved' });
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
+
+  it('notifica un fallo de guardado por cierre automático y permite recuperarlo', async () => {
+    await new Promise<void>((resolve) => application.io.close(() => resolve()));
+    application = createApplication({
+      config: readConfig({ DEFAULT_QUESTION_DURATION_SECONDS: '1' }),
+      workbookStorage: storage,
+      logger,
+    });
+    await listen();
+    const t = await teacher();
+    const a = await student(t.session);
+    vi.spyOn(storage, 'uploadWorkbook').mockRejectedValueOnce(
+      new WorkbookStorageError('WORKBOOK_LOCKED'),
+    );
+    const failed = nextSave(t.socket, 'error');
+    const own = nextEvent(a.socket, 'student:result');
+    await start(t);
+    expect(await failed).toMatchObject({ error: { code: 'WORKBOOK_LOCKED' } });
+    expect(await own).toMatchObject({
+      answered: false,
+      points: 0,
+      elapsedMs: 1000,
+    });
+    const saved = nextSave(t.socket);
+    t.socket.emit('teacher:retry-save-results', controls(t.session));
+    await saved;
+    const finished = nextEvent(t.socket, 'game:ended');
+    t.socket.emit('teacher:end-game', controls(t.session));
+    await finished;
   });
 
   it('permite dos rondas con 40 alumnos en la misma IP y envía resultados individuales', async () => {

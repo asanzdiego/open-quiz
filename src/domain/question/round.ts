@@ -29,13 +29,19 @@ export interface ParticipantResult {
   totalPoints: number;
 }
 
-/** Resultado conservado en memoria para la futura escritura de Pxx. */
+export interface ResultPersistence {
+  status: 'pending' | 'saving' | 'saved' | 'error';
+  error: { code: string; message: string } | null;
+}
+
+/** Resultado y estado de guardado conservados en memoria hasta que expire la sesión. */
 export interface RoundResult {
   questionId: string;
   questionNumber: number;
   correctOptionId: string;
   correctAnswer: string;
   participants: ParticipantResult[];
+  persistence: ResultPersistence;
 }
 
 export function createQuestionRound(
