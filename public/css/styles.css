@@ -132,3 +132,22 @@ li {
 #student-link {
   overflow-wrap: anywhere;
 }
+
+.answer-options {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}
+.answer {
+  width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  min-height: 4rem;
+}
+.ranking {
+  list-style: none;
+  padding: 0;
+}
+#question-text {
+  overflow-wrap: anywhere;
+}

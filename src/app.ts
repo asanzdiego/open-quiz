@@ -27,7 +27,12 @@ interface ApplicationOptions {
 
 export function createApplication(options: ApplicationOptions = {}) {
   const config = options.config ?? readConfig({});
-  const sessions = options.sessions ?? new SessionService();
+  const sessions =
+    options.sessions ??
+    new SessionService(undefined, {
+      questionDurationMs: config.questionDurationMs,
+      maxPointsPerQuestion: config.maxPointsPerQuestion,
+    });
   const storage =
     options.workbookStorage ??
     (config.nextcloud
@@ -84,7 +89,7 @@ export function createApplication(options: ApplicationOptions = {}) {
       }
     },
   });
-  registerLobbyHandlers(io, {
+  const realtime = registerLobbyHandlers(io, {
     sessions,
     storage,
     ...(options.logger ? { logger: options.logger } : {}),
@@ -95,9 +100,13 @@ export function createApplication(options: ApplicationOptions = {}) {
       sessionTtlMs: config.sessionTtlMs,
       finishedSessionTtlMs: config.finishedSessionTtlMs,
     });
+    realtime.pruneTimers();
   }, 60_000);
   cleanup.unref();
-  httpServer.once('close', () => clearInterval(cleanup));
+  httpServer.once('close', () => {
+    clearInterval(cleanup);
+    realtime.dispose();
+  });
 
   return { app, httpServer, io };
 }

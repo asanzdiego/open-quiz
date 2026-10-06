@@ -13,6 +13,14 @@ export class LobbyRateLimiter {
     if (creatingSession) this.#consume(`create:${address}`, 5, now);
   }
 
+  checkGameplay(socketId: string): void {
+    const now = Date.now();
+    for (const [key, window] of this.#windows) {
+      if (now - window.startedAt >= 60_000) this.#windows.delete(key);
+    }
+    this.#consume(`game:${socketId}`, 120, now);
+  }
+
   #consume(key: string, limit: number, now: number): void {
     const window = this.#windows.get(key) ?? { startedAt: now, count: 0 };
     this.#windows.set(key, window);

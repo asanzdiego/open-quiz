@@ -9,7 +9,14 @@ export type DomainErrorCode =
   | 'NICK_TAKEN'
   | 'PARTICIPANT_NOT_FOUND'
   | 'INVALID_RECONNECT_TOKEN'
-  | 'INVALID_SOCKET_ID';
+  | 'INVALID_SOCKET_ID'
+  | 'NO_QUESTIONS'
+  | 'NO_MORE_QUESTIONS'
+  | 'QUESTION_NOT_ACTIVE'
+  | 'QUESTION_MISMATCH'
+  | 'QUESTION_EXPIRED'
+  | 'INVALID_ANSWER_OPTION'
+  | 'PARTICIPANT_NOT_CONNECTED';
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;

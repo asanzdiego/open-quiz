@@ -6,6 +6,8 @@ export interface AppConfig {
   nextcloud: NextcloudConfig | undefined;
   sessionTtlMs: number;
   finishedSessionTtlMs: number;
+  questionDurationMs: number;
+  maxPointsPerQuestion: number;
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -35,6 +37,19 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port,
     nodeEnv,
     nextcloud: readNextcloudConfig(env),
+    questionDurationMs:
+      readInteger(
+        env.DEFAULT_QUESTION_DURATION_SECONDS ?? '20',
+        'DEFAULT_QUESTION_DURATION_SECONDS',
+        1,
+        3600,
+      ) * 1000,
+    maxPointsPerQuestion: readInteger(
+      env.MAX_POINTS_PER_QUESTION ?? '1000',
+      'MAX_POINTS_PER_QUESTION',
+      1,
+      1_000_000,
+    ),
     sessionTtlMs: readTtl(
       env.SESSION_TTL_MINUTES ?? '120',
       'SESSION_TTL_MINUTES',
@@ -44,6 +59,23 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       'FINISHED_SESSION_TTL_MINUTES',
     ),
   };
+}
+
+function readInteger(
+  raw: string,
+  name: string,
+  min: number,
+  max: number,
+): number {
+  const value = Number(raw);
+  if (
+    !/^\d+$/u.test(raw) ||
+    !Number.isSafeInteger(value) ||
+    value < min ||
+    value > max
+  )
+    throw new Error(`${name} debe ser un entero entre ${min} y ${max}.`);
+  return value;
 }
 
 function readTtl(raw: string, name: string): number {

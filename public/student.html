@@ -58,6 +58,37 @@
         <p id="participant-count" role="status"></p>
         <ul id="participants" aria-label="Participantes"></ul>
       </section>
+      <section id="game" aria-labelledby="game-title" hidden>
+        <h2 id="game-title"></h2>
+        <div id="question-panel">
+          <p id="question-number"></p>
+          <h3 id="question-text"></h3>
+          <p id="countdown-panel">
+            Tiempo restante: <strong id="countdown"></strong>
+          </p>
+          <div
+            id="answer-options"
+            class="answer-options"
+            aria-label="Opciones de respuesta"
+          ></div>
+        </div>
+        <p id="answer-feedback" role="status" hidden></p>
+        <div id="question-result" hidden>
+          <p id="student-result" role="status"></p>
+          <p id="correct-answer"></p>
+          <p id="question-statistics"></p>
+          <p>Espera a que el profesor continúe.</p>
+        </div>
+        <div id="podium-panel" hidden>
+          <p id="final-score"></p>
+          <h3>Podio</h3>
+          <ol id="podium" class="ranking"></ol>
+        </div>
+        <div id="ranking-panel" hidden>
+          <h3>Clasificación</h3>
+          <ol id="ranking" class="ranking"></ol>
+        </div>
+      </section>
       <noscript><p>Activa JavaScript para entrar a la partida.</p></noscript>
     </main>
   </body>

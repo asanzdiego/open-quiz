@@ -7,6 +7,8 @@ describe('Configuración', () => {
       port: 3000,
       nodeEnv: 'development',
       nextcloud: undefined,
+      questionDurationMs: 20_000,
+      maxPointsPerQuestion: 1000,
       sessionTtlMs: 120 * 60_000,
       finishedSessionTtlMs: 30 * 60_000,
     });
@@ -17,6 +19,8 @@ describe('Configuración', () => {
       port: 8080,
       nodeEnv: 'production',
       nextcloud: undefined,
+      questionDurationMs: 20_000,
+      maxPointsPerQuestion: 1000,
       sessionTtlMs: 120 * 60_000,
       finishedSessionTtlMs: 30 * 60_000,
     });
@@ -32,6 +36,32 @@ describe('Configuración', () => {
   it('rechaza un entorno desconocido', () => {
     expect(() => readConfig({ NODE_ENV: 'desconocido' })).toThrow('NODE_ENV');
   });
+
+  it('lee los tiempos y puntos del juego', () => {
+    expect(
+      readConfig({
+        DEFAULT_QUESTION_DURATION_SECONDS: '45',
+        MAX_POINTS_PER_QUESTION: '2000',
+      }),
+    ).toMatchObject({ questionDurationMs: 45_000, maxPointsPerQuestion: 2000 });
+  });
+
+  it.each(['', '0', '-1', '1.5', 'abc', ' 20 ', '3601', '999999999999'])(
+    'rechaza la duración inválida %j',
+    (value) => {
+      expect(() =>
+        readConfig({ DEFAULT_QUESTION_DURATION_SECONDS: value }),
+      ).toThrow('DEFAULT_QUESTION_DURATION_SECONDS');
+    },
+  );
+  it.each(['', '0', '-1', '1.5', 'abc', ' 1000 ', '1000001', '999999999999'])(
+    'rechaza los puntos inválidos %j',
+    (value) => {
+      expect(() => readConfig({ MAX_POINTS_PER_QUESTION: value })).toThrow(
+        'MAX_POINTS_PER_QUESTION',
+      );
+    },
+  );
 
   it('lee los TTL de sesiones desde el entorno', () => {
     expect(

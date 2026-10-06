@@ -2,7 +2,7 @@
 
 Aplicación educativa de cuestionarios en tiempo real, con frontend sencillo y sin cuentas ni base de datos.
 
-**Estado actual: Fases 1–5 terminadas.** El profesor puede crear una partida indicando un XLSX de Nextcloud; el backend lo descarga y valida, crea la sesión en memoria y muestra un código. Los alumnos entran con código y nick y el lobby se actualiza en tiempo real. Profesor y alumnos pueden recuperar su conexión. El inicio de preguntas corresponde a la Fase 6; el botón `Iniciar` permanece deshabilitado.
+**Estado actual: Fases 1–6 terminadas.** El profesor crea una partida desde un XLSX de Nextcloud y controla las preguntas. Los alumnos entran con código y nick, responden en tiempo real y ven sus puntos, clasificación y podio. El servidor controla tiempo y puntuación; profesor y alumnos recuperan el estado actual al reconectar. Los resultados se conservan en memoria. La escritura en el XLSX corresponde a la Fase 7 y todavía no se realiza.
 
 ## Requisitos e instalación
 
@@ -29,7 +29,7 @@ npm test
 npm run build
 ```
 
-`npm run format:check` comprueba el formato sin modificar archivos y `npm run test:watch` ejecuta las pruebas al editar. Las pruebas cubren la configuración, `/health`, el frontend estático, Socket.IO mediante polling y WebSocket, el dominio y la importación de XLSX. El flujo del lobby usa almacenamiento simulado y clientes Socket.IO reales: creación, tres alumnos, nicks duplicados, desconexión, recuperación con tokens, conservación de puntos, aislamiento de rooms, validación, errores y límites de intentos. También prueban WebDAV con un cliente simulado y con el cliente real contra un servidor HTTP local. Los fixtures de Excel están en `tests/fixtures/excel/` y pueden regenerarse con `npm run fixtures:excel`. Las pruebas no requieren Nextcloud ni servicios externos; necesitan poder abrir puertos locales.
+`npm run format:check` comprueba el formato sin modificar archivos y `npm run test:watch` ejecuta las pruebas al editar. Las pruebas cubren la configuración, `/health`, el frontend estático, Socket.IO mediante polling y WebSocket, el dominio y la importación de XLSX. El flujo del lobby usa almacenamiento simulado y clientes Socket.IO reales: creación, tres alumnos, nicks duplicados, desconexión, recuperación con tokens, conservación de puntos, aislamiento de rooms, validación, errores y límites de intentos. Las pruebas del juego verifican además el flujo completo de dos preguntas y podio, opciones iguales para todos sin datos de corrección activos, una respuesta por alumno, reloj del servidor, cierre automático, empates, puntuación acumulada, permisos, recuperación en cada estado y aislamiento de partidas. También prueban WebDAV con un cliente simulado y con el cliente real contra un servidor HTTP local. Los fixtures de Excel están en `tests/fixtures/excel/` y pueden regenerarse con `npm run fixtures:excel`. Las pruebas no requieren Nextcloud ni servicios externos; necesitan poder abrir puertos locales.
 
 Para ejecutar el código compilado:
 
@@ -50,12 +50,12 @@ El frontend sigue sirviéndose desde `public/`. Para detener el servidor utiliza
 | `NEXTCLOUD_USERNAME`                | Sin configurar       | Usuario de Nextcloud; solo backend                     |
 | `NEXTCLOUD_APP_PASSWORD`            | Sin configurar       | Contraseña de aplicación; solo backend                 |
 | `NEXTCLOUD_REQUEST_TIMEOUT_MS`      | `15000`              | Tiempo máximo por descarga/subida, entre 1 y 300000 ms |
-| `DEFAULT_QUESTION_DURATION_SECONDS` | `20`                 | Reservada para fases posteriores                       |
-| `MAX_POINTS_PER_QUESTION`           | `1000`               | Reservada para fases posteriores                       |
+| `DEFAULT_QUESTION_DURATION_SECONDS` | `20`                 | Duración por pregunta, entero entre 1 y 3600 segundos  |
+| `MAX_POINTS_PER_QUESTION`           | `1000`               | Máximo por pregunta, entero entre 1 y 1000000          |
 | `SESSION_TTL_MINUTES`               | `120`                | Minutos sin actividad antes de eliminar una sesión     |
 | `FINISHED_SESSION_TTL_MINUTES`      | `30`                 | Minutos desde la finalización para eliminar una sesión |
 
-Las variables de tiempo de pregunta y puntos máximos todavía no se leen ni validan; se conectarán al juego en la Fase 6. Los TTL son enteros positivos y se comprueban cada minuto. La actividad incluye creación, entrada, reconexión y desconexión; mantener una página abierta sin interactuar no renueva el TTL.
+La duración y los puntos se leen y validan al arrancar, y se aplican a todas las preguntas. Los TTL son enteros positivos y se comprueban cada minuto. La actividad incluye creación, entrada, reconexión, desconexión, respuestas válidas y controles del profesor; mantener una página abierta sin interactuar no renueva el TTL. Los temporizadores de preguntas se cancelan al cerrar una pregunta, eliminar su sesión o detener el servidor.
 
 El servidor arranca con las tres variables de Nextcloud ausentes o vacías; en ese caso, crear una partida devuelve un error comprensible. Si configuras alguna, debes completar las tres; una configuración parcial o inválida impide arrancar. El timeout se valida al configurar la conexión. Ni la configuración ni las credenciales se envían al navegador o se registran en logs. La descarga se realiza al crear la partida, no al arrancar el servidor.
 
@@ -113,11 +113,11 @@ LOBBY → FINISHED
 QUESTION_RESULTS → FINISHED
 ```
 
-Una partida terminada no se reabre. Para terminar desde una pregunta activa, primero debe pasarse por los resultados. Estas transiciones solo controlan el estado: el inicio de preguntas, el temporizador, las respuestas y el ranking corresponden a la Fase 6.
+Una partida terminada no se reabre. Para terminar desde una pregunta activa, primero debe cerrarse y calcularse sus resultados. `transitionSession` delega en los métodos de juego para mantener esas reglas; no cambia el estado saltándose el cálculo de puntos. Tras la última pregunta, el profesor pulsa **Finalizar partida**. También puede finalizar desde el lobby o desde resultados aunque queden preguntas.
 
 `cleanupExpired({ sessionTtlMs, finishedSessionTtlMs })` elimina sesiones sin actividad al alcanzar el primer TTL y sesiones terminadas al alcanzar el segundo, medido desde `finishedAt`. Elimina también el índice de código. Ambos límites son enteros positivos en milisegundos. La aplicación lo invoca cada minuto y cancela el temporizador al cerrar el servidor. La sesión conserva la referencia del libro y las preguntas importadas, nunca una copia del XLSX como fuente de verdad para futuras escrituras.
 
-`calculatePoints({ isCorrect, elapsedMs, durationMs, maxPoints })` aplica la fórmula lineal, redondea a entero y limita el resultado a `[0, maxPoints]`. El máximo predeterminado es 1000. Una respuesta incorrecta o recibida al alcanzar o superar la duración obtiene cero puntos. Los tiempos negativos se limitan a cero; las duraciones no positivas, los números no finitos y los máximos inválidos generan un error. Los tiempos del dominio se expresan en milisegundos y, al integrar el juego, procederán del reloj del servidor.
+`calculatePoints({ isCorrect, elapsedMs, durationMs, maxPoints })` aplica la fórmula lineal, redondea a entero y limita el resultado a `[0, maxPoints]`. El máximo predeterminado es 1000. Una respuesta incorrecta o recibida al alcanzar o superar la duración obtiene cero puntos. Los tiempos negativos se limitan a cero; las duraciones no positivas, los números no finitos y los máximos inválidos generan un error. Los tiempos del dominio se expresan en milisegundos y proceden del reloj del servidor.
 
 ## HTTP y conexión en tiempo real
 
@@ -138,7 +138,30 @@ Los eventos están tipados en `src/realtime/events.ts`. Todos los payloads entra
 
 Las respuestas del profesor contienen `{ sessionId, joinCode, teacherToken, lobby }`; las del alumno contienen `{ joinCode, participantId, reconnectToken, nick, totalPoints, lobby }`. Solo se envían al socket propietario. `lobby:updated` se publica en la room de esa sesión al entrar, desconectar o reconectar un alumno. Su payload es `{ joinCode, state, questionCount, participants }`, con participantes `{ id, nick, connected, totalPoints }`. No incluye preguntas, respuestas correctas, tokens, rutas ni IDs de socket.
 
-No se habilita CORS para otros orígenes. El handshake rechaza un `Origin` cuyo host no coincida con el servidor, también para WebSocket; los clientes de pruebas sin `Origin` pueden conectar. El límite de payload es 16 KiB. Se admiten inicialmente 120 operaciones y cinco intentos de creación por minuto e IP vista por el servidor, compartidos entre sockets. No se confía en `X-Forwarded-For`; detrás de un proxy varios usuarios pueden compartir esos límites. Los logs incluyen eventos e identificadores internos, sin tokens, credenciales, referencias ni detalles de errores inesperados.
+Los eventos de juego añaden este contrato:
+
+| Cliente → servidor            | Payload                          |
+| ----------------------------- | -------------------------------- |
+| `teacher:start-game`          | `{ sessionId, teacherToken }`    |
+| `teacher:start-next-question` | `{ sessionId, teacherToken }`    |
+| `teacher:close-question`      | `{ sessionId, teacherToken }`    |
+| `teacher:end-game`            | `{ sessionId, teacherToken }`    |
+| `student:answer`              | `{ questionId, answerOptionId }` |
+
+Los controles exigen tanto pertenencia al rol profesor en esa sesión como el token secreto. Para responder se utiliza la identidad del socket incorporado; el cliente no elige otro participante ni otra sesión.
+
+| Servidor → cliente  | Alcance y contenido                                                                                                                                                                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `game:updated`      | Privado tras crear, entrar o reconectar: `{ state, question, result, ranking, podium, progress, self, serverNow }`. `question` incluye opciones y plazo, `result` solo existe tras cerrar, `progress` solo llega al profesor y `self` solo contiene la identidad y resultado del alumno propietario. |
+| `question:started`  | Room de la sesión: `{ questionId, questionNumber, questionCount, text, options, startedAt, endsAt, durationMs }`; cada opción es `{ id, text }`.                                                                                                                                                     |
+| `question:progress` | Solo profesor: `{ questionId, answeredCount, participantCount }`.                                                                                                                                                                                                                                    |
+| `answer:accepted`   | Solo alumno que responde: `{ questionId, answerOptionId }`, sin corrección ni puntuación.                                                                                                                                                                                                            |
+| `question:ended`    | Room de la sesión: `{ questionId, questionNumber, correctOptionId, correctAnswer, answeredCount, correctCount, participantCount, hasNextQuestion }`.                                                                                                                                                 |
+| `student:result`    | Solo propietario: `{ participantId, nick, answered, isCorrect, elapsedMs, points, totalPoints, position }`.                                                                                                                                                                                          |
+| `ranking:updated`   | Room de la sesión: entradas `{ participantId, nick, totalPoints, position }`.                                                                                                                                                                                                                        |
+| `game:ended`        | Room de la sesión: `{ ranking, podium }`; podio con hasta tres entradas.                                                                                                                                                                                                                             |
+
+No se habilita CORS para otros orígenes. El handshake rechaza un `Origin` cuyo host no coincida con el servidor, también para WebSocket; los clientes de pruebas sin `Origin` pueden conectar. El límite de payload es 16 KiB. La creación, entrada y reconexión admiten 120 operaciones y cinco intentos de creación por minuto e IP vista por el servidor, compartidos entre sockets. Los controles del juego y las respuestas tienen un límite separado de 120 operaciones por minuto y socket; las respuestas de 40 alumnos bajo la misma IP no consumen un contador común. No se confía en `X-Forwarded-For`; detrás de un proxy varios usuarios pueden compartir los límites de entrada. Los logs incluyen eventos e identificadores internos, sin tokens, credenciales, referencias ni detalles de errores inesperados.
 
 ## Uso por profesor y alumnos
 
@@ -155,7 +178,20 @@ Si la sesión ya no existe o el token no es válido, se borra la recuperación g
 
 Con un XLSX válido en Nextcloud y el backend configurado, crea una partida y entra con tres dispositivos o perfiles de navegador distintos. Comprueba que el profesor recibe los tres nicks y que un nick repetido se rechaza. Recarga una página de alumno: debe recuperar el mismo nick sin duplicarlo. Desconecta su red y restáurala: su estado debe volver a conectado. Recarga la pestaña del profesor y comprueba que conserva código y participantes. Crea una segunda partida en otra pestaña independiente y comprueba que sus participantes no aparecen en la primera.
 
-El juego, las respuestas y la escritura de resultados quedan pendientes de las Fases 6 y 7. La creación del lobby únicamente descarga el libro; no lo modifica.
+### Juego en tiempo real
+
+1. El profesor pulsa **Iniciar**. Todos los alumnos reciben la misma pregunta y las mismas cuatro opciones, mezcladas una sola vez en el servidor. Los UUID de las opciones no indican cuál es correcta. El orden de preguntas sigue el Excel.
+2. Cada alumno pulsa una opción. Los botones se bloquean y aparece **Respuesta enviada**, sin revelar acierto ni puntos. El servidor conserva la primera respuesta válida; un reenvío devuelve la confirmación de esa respuesta sin cambiarla. Rechaza opciones desconocidas, preguntas distintas, conexiones sustituidas y respuestas fuera de plazo. No acepta tiempos enviados por el navegador.
+3. Al agotarse el tiempo, o al pulsar **Cerrar pregunta**, el servidor calcula los puntos y totales una sola vez. Se muestran respuesta correcta, número de respuestas y aciertos y clasificación. Cada alumno recibe privadamente su resultado, puntos, total y puesto. Quien no responde, incluso si está desconectado, obtiene cero puntos y un tiempo igual a la duración máxima en milisegundos.
+4. El profesor pulsa **Siguiente pregunta**. Nunca se avanza automáticamente, aunque todos hayan respondido. Al finalizar, pulsa **Finalizar partida** para mostrar el podio de hasta tres participantes y la clasificación completa. Los empates se resuelven por orden de incorporación a la partida; los puestos son consecutivos.
+
+El contador del navegador es visual y se sincroniza con el reloj del servidor al recibir una pregunta o recuperar la sesión. El plazo se comprueba también al recibir una respuesta, aunque el callback del temporizador se haya retrasado. Al reconectar se recuperan pregunta, opciones en el mismo orden, plazo original, respuesta ya enviada, clasificación y resultado propio, según el estado de la partida. El temporizador sigue funcionando sin el profesor conectado.
+
+La creación descarga el libro; el juego no lo modifica. Los resultados de todas las preguntas cerradas permanecen en `completedRounds` de su sesión hasta que expire o se reinicie el proceso. La escritura de `P01`, `P02`, etc., con bloqueo y reintento, queda pendiente de la Fase 7.
+
+### Prueba manual del juego
+
+Usa el fixture `valid-header.xlsx` en Nextcloud y tres móviles o perfiles distintos. Inicia desde el profesor y comprueba que todos reciben opciones idénticas. Haz que un alumno responda correctamente, otro incorrectamente y el tercero no responda. Recarga el primero antes del cierre: debe conservar el bloqueo de respuesta. Espera el cierre por tiempo y comprueba puntos, clasificación y que la segunda pregunta aún no se ha iniciado. Recarga el profesor, pulsa **Siguiente pregunta**, responde y ciérrala manualmente. Finaliza y comprueba podio y puesto de cada alumno, también al recargar. En esta fase el fichero de Nextcloud debe conservarse sin pestañas nuevas.
 
 ## Formato del Excel e importación
 
@@ -175,7 +211,7 @@ La primera fila con contenido puede ser una cabecera con los cinco títulos ante
 - Cada pregunta requiere un enunciado, una respuesta correcta y tres incorrectas no vacías. Las cuatro respuestas deben ser distintas tras la normalización; se distinguen mayúsculas y minúsculas.
 - Se ignoran filas completamente vacías y celdas vacías con solo formato. Los datos fuera de A–E se rechazan para no descartar respuestas adicionales.
 - Se rechazan fórmulas, incluidas las que tienen un resultado almacenado, fechas, valores lógicos, hipervínculos, errores de Excel, celdas combinadas en los datos e imágenes en la hoja seleccionada. Utiliza valores literales como texto para fechas o respuestas como `Sí` y `No`.
-- Se mantiene el orden de las preguntas y de las tres respuestas incorrectas. Cada pregunta recibe un UUID y contiene `text`, `correctAnswer` e `incorrectAnswers`. Este modelo es exclusivo del backend: incluye la respuesta correcta y no debe enviarse directamente durante una pregunta activa. El barajado se implementará en la Fase 6.
+- Se mantiene el orden de las preguntas y de las tres respuestas incorrectas. Cada pregunta recibe un UUID y contiene `text`, `correctAnswer` e `incorrectAnswers`. Este modelo es exclusivo del backend: incluye la respuesta correcta y no debe enviarse directamente durante una pregunta activa. Al abrir la pregunta, el servidor genera y baraja opciones con UUID independientes del modelo importado.
 - Un libro inválido o una fila inválida rechaza toda la importación. `ExcelImportError` proporciona un código, un mensaje comprensible y, cuando corresponde, el nombre de hoja y la dirección de celda, sin incluir su contenido en el error.
 
 El importador no lee archivos locales ni modifica el `Buffer`. Los archivos locales solo se utilizan en las pruebas. El adaptador WebDAV obtiene los libros desde Nextcloud; la escritura de resultados en las pestañas `P01`, `P02`, etc. corresponde a la Fase 7.
@@ -197,15 +233,14 @@ src/
     identifiers.ts  Generación criptográfica de códigos y tokens
     errors.ts       Errores de dominio con código y mensaje comprensible
     participant/    Modelo y normalización del nick
-    session/        Modelo, transiciones y repositorio en memoria
-                    Vista pública del lobby sin secretos
+    session/        Modelo, transiciones, repositorio, lobby y vistas públicas del juego
     scoring/        Función de puntuación lineal
-    question/       Modelo de pregunta importada, exclusivo del backend
+    question/       Pregunta importada, ronda con opciones barajadas y resultados internos
   excel/
     import-questions.ts    Lectura y validación XLSX desde Buffer
     excel-import-error.ts  Errores de importación con hoja y celda
   services/
-    session-service.ts  Creación, participantes, reconexión y limpieza
+    session-service.ts  Sesiones, participantes, preguntas, respuestas, puntuación y limpieza
     load-session-workbook.ts   Descarga y validación antes de crear la sesión
     workbook-reference.ts      Validación compartida de rutas relativas XLSX
     workbook-storage.ts        Contrato de descarga/subida en memoria
@@ -214,8 +249,9 @@ src/
     nextcloud-webdav-workbook-storage.ts  Implementación WebDAV autenticada
   realtime/
     events.ts         Tipos de eventos, payloads y pertenencia del socket
-    payloads.ts       Validación de todos los payloads del lobby
-    lobby-handlers.ts Adaptación del flujo a Socket.IO y rooms aisladas
+    payloads.ts       Validación estricta de payloads del lobby y del juego
+    lobby-handlers.ts Creación, reconexión, rooms y gestión compartida de errores
+    game-handlers.ts  Controles, respuestas, temporizadores y emisión de vistas públicas
     rate-limiter.ts   Límite de intentos por IP sin dependencias adicionales
 scripts/
   check-nextcloud.ts Prueba manual de descarga/importación y subida opcional
@@ -228,9 +264,12 @@ public/
   js/lobby.js       Conexión, recuperación y lista de participantes compartidas
   js/teacher.js     Creación y código de la sala
   js/student.js     Entrada y nick recuperado
+  js/game.js        Pregunta, contador, controles, resultados, clasificación y podio
 tests/
   app.test.ts       Pruebas HTTP y conexión en tiempo real
   lobby-integration.test.ts   Flujo real del lobby con almacenamiento simulado
+  game-service.test.ts        Reglas, plazos, puntuación, estados y aislamiento del juego
+  game-integration.test.ts    Flujo completo, temporizadores y reconexión por Socket.IO
   config.test.ts    Pruebas de configuración
   identifiers.test.ts        Formato de códigos y secretos
   session-repository.test.ts Índices, colisiones y eliminación
@@ -244,7 +283,7 @@ tests/
   helpers/in-memory-workbook-storage.ts Mock de almacenamiento para servicios
 ```
 
-La factoría `createApplication({ config, workbookStorage, sessions, logger })` permite inyectar configuración, almacenamiento y servicios para probar la aplicación. En producción recibe la configuración del entorno e instancia el adaptador WebDAV; las pruebas del lobby inyectan almacenamiento en memoria. TypeScript se ejecuta con Node.js en desarrollo y se compila a `dist/` para `npm start`. Se conservan las dependencias existentes, sin framework frontend ni nuevas librerías de ejecución.
+La factoría `createApplication({ config, workbookStorage, sessions, logger })` permite inyectar configuración, almacenamiento y servicios para probar la aplicación. Si se inyecta un `SessionService`, su reloj, duración y puntos proceden de sus propias opciones; en ejecución normal se configura desde el entorno. En producción recibe la configuración del entorno e instancia el adaptador WebDAV; las pruebas del lobby inyectan almacenamiento en memoria. TypeScript se ejecuta con Node.js en desarrollo y se compila a `dist/` para `npm start`. Se conservan las dependencias existentes, sin framework frontend ni nuevas librerías de ejecución.
 
 `package.json` fija mediante `overrides` la dependencia UUID de ExcelJS en la rama 11 a partir de 11.1.1, que corrige el [aviso GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq). ExcelJS conserva su versión y utiliza la API `v4` de esa dependencia.
 

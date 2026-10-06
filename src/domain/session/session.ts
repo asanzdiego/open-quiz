@@ -1,6 +1,7 @@
 import { DomainError } from '../errors.ts';
 import type { Participant } from '../participant/participant.ts';
 import type { Question } from '../question/question.ts';
+import type { QuestionRound, RoundResult } from '../question/round.ts';
 
 export interface SessionWorkbook {
   reference: string;
@@ -18,6 +19,9 @@ export interface Session {
   readonly createdAt: number;
   readonly workbookReference: string | null;
   readonly questions: readonly Question[];
+  currentQuestionIndex: number;
+  currentRound: QuestionRound | null;
+  readonly completedRounds: RoundResult[];
   state: SessionState;
   lastActivityAt: number;
   finishedAt: number | null;

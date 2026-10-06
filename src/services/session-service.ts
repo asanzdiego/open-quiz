@@ -13,6 +13,12 @@ import {
 } from '../domain/participant/participant.ts';
 import { InMemorySessionRepository } from '../domain/session/in-memory-session-repository.ts';
 import {
+  createQuestionRound,
+  type RoundResult,
+} from '../domain/question/round.ts';
+import { calculatePoints } from '../domain/scoring/calculate-points.ts';
+import { getGameSnapshot, type GameSnapshot } from '../domain/session/game.ts';
+import {
   assertSessionTransition,
   type Session,
   type SessionState,
@@ -22,6 +28,8 @@ import {
 interface SessionServiceOptions {
   now?: () => number;
   joinCodeGenerator?: () => string;
+  questionDurationMs?: number;
+  maxPointsPerQuestion?: number;
 }
 
 interface SessionCleanupOptions {
@@ -33,6 +41,8 @@ export class SessionService {
   readonly #repository: InMemorySessionRepository;
   readonly #now: () => number;
   readonly #joinCodeGenerator: () => string;
+  readonly #questionDurationMs: number;
+  readonly #maxPointsPerQuestion: number;
 
   constructor(
     repository = new InMemorySessionRepository(),
@@ -41,6 +51,22 @@ export class SessionService {
     this.#repository = repository;
     this.#now = options.now ?? Date.now;
     this.#joinCodeGenerator = options.joinCodeGenerator ?? generateJoinCode;
+    this.#questionDurationMs = options.questionDurationMs ?? 20_000;
+    this.#maxPointsPerQuestion = options.maxPointsPerQuestion ?? 1000;
+    if (
+      !Number.isSafeInteger(this.#questionDurationMs) ||
+      this.#questionDurationMs < 1 ||
+      this.#questionDurationMs > 3_600_000
+    )
+      throw new RangeError(
+        'La duración debe estar entre 1 y 3600000 milisegundos.',
+      );
+    if (
+      !Number.isSafeInteger(this.#maxPointsPerQuestion) ||
+      this.#maxPointsPerQuestion < 0 ||
+      this.#maxPointsPerQuestion > 1_000_000
+    )
+      throw new RangeError('El máximo debe estar entre 0 y 1000000 puntos.');
   }
 
   createSession(workbook?: SessionWorkbook): Session {
@@ -79,6 +105,9 @@ export class SessionService {
       state: 'LOBBY',
       workbookReference: workbook?.reference ?? null,
       questions: structuredClone(workbook?.questions ?? []),
+      currentQuestionIndex: -1,
+      currentRound: null,
+      completedRounds: [],
       participants: new Map(),
       createdAt: now,
       lastActivityAt: now,
@@ -113,9 +142,186 @@ export class SessionService {
     this.#authorizeTeacher(session, teacherToken);
     assertSessionTransition(session.state, nextState);
 
-    session.state = nextState;
+    if (nextState === 'QUESTION_ACTIVE')
+      return session.state === 'LOBBY'
+        ? this.startGame(id, teacherToken)
+        : this.startNextQuestion(id, teacherToken);
+    if (nextState === 'QUESTION_RESULTS')
+      return this.closeQuestion(id, teacherToken);
+    return this.endGame(id, teacherToken);
+  }
+
+  getGameSnapshot(id: string, participantId?: string): GameSnapshot {
+    return getGameSnapshot(
+      this.#requireSession(id),
+      this.#now(),
+      participantId,
+    );
+  }
+
+  startGame(id: string, teacherToken: string): Session {
+    const session = this.#requireSession(id);
+    this.#authorizeTeacher(session, teacherToken);
+    if (session.state !== 'LOBBY')
+      throw new DomainError(
+        'INVALID_TRANSITION',
+        'La partida ya ha empezado o ha terminado.',
+      );
+    if (session.questions.length === 0)
+      throw new DomainError('NO_QUESTIONS', 'La partida no tiene preguntas.');
+    return this.#startQuestion(session);
+  }
+
+  startNextQuestion(id: string, teacherToken: string): Session {
+    const session = this.#requireSession(id);
+    this.#authorizeTeacher(session, teacherToken);
+    if (session.state !== 'QUESTION_RESULTS')
+      throw new DomainError(
+        'INVALID_TRANSITION',
+        'Cierra la pregunta antes de pasar a la siguiente.',
+      );
+    if (session.currentQuestionIndex + 1 >= session.questions.length)
+      throw new DomainError(
+        'NO_MORE_QUESTIONS',
+        'No quedan preguntas. Puedes finalizar la partida.',
+      );
+    return this.#startQuestion(session);
+  }
+
+  #startQuestion(session: Session): Session {
+    const index = session.currentQuestionIndex + 1;
+    const now = this.#now();
+    session.currentRound = createQuestionRound(
+      session.questions[index]!,
+      index + 1,
+      [...session.participants.keys()],
+      now,
+      this.#questionDurationMs,
+    );
+    session.currentQuestionIndex = index;
+    session.state = 'QUESTION_ACTIVE';
+    session.lastActivityAt = now;
+    return structuredClone(session);
+  }
+
+  submitAnswer(
+    id: string,
+    participantId: string,
+    socketId: string,
+    questionId: string,
+    answerOptionId: string,
+  ): { questionId: string; answerOptionId: string; accepted: boolean } {
+    const session = this.#requireSession(id);
+    const participant = this.#requireParticipant(session, participantId);
+    if (!participant.connected || participant.socketId !== socketId)
+      throw new DomainError(
+        'PARTICIPANT_NOT_CONNECTED',
+        'Tu conexión ya no está activa. Vuelve a conectar.',
+      );
+    const round = session.currentRound;
+    if (session.state !== 'QUESTION_ACTIVE' || !round)
+      throw new DomainError(
+        'QUESTION_NOT_ACTIVE',
+        'La pregunta no está abierta.',
+      );
+    if (round.questionId !== questionId)
+      throw new DomainError(
+        'QUESTION_MISMATCH',
+        'La respuesta no corresponde a la pregunta actual.',
+      );
+    const now = this.#now();
+    if (now >= round.endsAt)
+      throw new DomainError('QUESTION_EXPIRED', 'La pregunta ya ha terminado.');
+    if (!round.options.some((option) => option.id === answerOptionId))
+      throw new DomainError(
+        'INVALID_ANSWER_OPTION',
+        'La opción de respuesta no existe.',
+      );
+    const previous = round.answers.get(participantId);
+    if (previous)
+      return {
+        questionId,
+        answerOptionId: previous.answerOptionId,
+        accepted: false,
+      };
+    round.answers.set(participantId, {
+      answerOptionId,
+      elapsedMs: Math.max(0, now - round.startedAt),
+    });
+    session.lastActivityAt = now;
+    return { questionId, answerOptionId, accepted: true };
+  }
+
+  closeQuestion(id: string, teacherToken: string): Session {
+    const session = this.#requireSession(id);
+    this.#authorizeTeacher(session, teacherToken);
+    return this.#closeQuestion(session);
+  }
+
+  remainingQuestionTime(id: string): number | null {
+    const session = this.#requireSession(id);
+    return session.state === 'QUESTION_ACTIVE' && session.currentRound
+      ? Math.max(0, session.currentRound.endsAt - this.#now())
+      : null;
+  }
+
+  closeExpiredQuestion(id: string): Session | null {
+    const session = this.#requireSession(id);
+    return this.remainingQuestionTime(id) === 0
+      ? this.#closeQuestion(session)
+      : null;
+  }
+
+  #closeQuestion(session: Session): Session {
+    const round = session.currentRound;
+    if (session.state !== 'QUESTION_ACTIVE' || !round)
+      throw new DomainError(
+        'QUESTION_NOT_ACTIVE',
+        'La pregunta no está abierta.',
+      );
+    const result: RoundResult = {
+      questionId: round.questionId,
+      questionNumber: round.questionNumber,
+      correctOptionId: round.correctOptionId,
+      correctAnswer: round.options.find(
+        (option) => option.id === round.correctOptionId,
+      )!.text,
+      participants: round.participantIds.map((participantId) => {
+        const participant = this.#requireParticipant(session, participantId);
+        const answer = round.answers.get(participantId);
+        const isCorrect = answer?.answerOptionId === round.correctOptionId;
+        const elapsedMs = answer?.elapsedMs ?? round.durationMs;
+        const points = calculatePoints({
+          isCorrect,
+          elapsedMs,
+          durationMs: round.durationMs,
+          maxPoints: this.#maxPointsPerQuestion,
+        });
+        participant.totalPoints += points;
+        return {
+          participantId,
+          nick: participant.nick,
+          answered: Boolean(answer),
+          isCorrect,
+          elapsedMs,
+          points,
+          totalPoints: participant.totalPoints,
+        };
+      }),
+    };
+    session.completedRounds.push(result);
+    session.state = 'QUESTION_RESULTS';
     session.lastActivityAt = this.#now();
-    if (nextState === 'FINISHED') session.finishedAt = session.lastActivityAt;
+    return structuredClone(session);
+  }
+
+  endGame(id: string, teacherToken: string): Session {
+    const session = this.#requireSession(id);
+    this.#authorizeTeacher(session, teacherToken);
+    assertSessionTransition(session.state, 'FINISHED');
+    session.state = 'FINISHED';
+    session.finishedAt = this.#now();
+    session.lastActivityAt = session.finishedAt;
     return structuredClone(session);
   }
 

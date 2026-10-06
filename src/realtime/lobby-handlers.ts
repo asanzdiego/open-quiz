@@ -14,6 +14,11 @@ import {
   parseTeacherReconnect,
 } from './payloads.ts';
 import { LobbyRateLimiter } from './rate-limiter.ts';
+import {
+  createGameHandlers,
+  sessionRoom as room,
+  teacherRoom,
+} from './game-handlers.ts';
 
 export interface LobbyLog {
   event: string;
@@ -51,10 +56,9 @@ export function registerLobbyHandlers(
     storage,
     logger = (entry) => console.info(JSON.stringify(entry)),
   }: LobbyHandlerOptions,
-): void {
+) {
   const limiter = new LobbyRateLimiter();
-  const room = (sessionId: string) => `session:${sessionId}`;
-  const teacherRoom = (sessionId: string) => `teacher:${sessionId}`;
+  const game = createGameHandlers(io, sessions, logger);
   const publishLobby = (sessionId: string) => {
     io.to(room(sessionId)).emit(
       'lobby:updated',
@@ -66,6 +70,7 @@ export function registerLobbyHandlers(
     async function run(
       operation: LobbyOperation,
       action: () => void | Promise<void>,
+      unjoined = true,
     ): Promise<void> {
       if (socket.data.busy) {
         socket.emit('app:error', {
@@ -77,11 +82,13 @@ export function registerLobbyHandlers(
       }
       socket.data.busy = true;
       try {
-        limiter.check(
-          socket.handshake.address,
-          operation === 'teacher:create-session',
-        );
-        if (socket.data.membership) {
+        if (unjoined)
+          limiter.check(
+            socket.handshake.address,
+            operation === 'teacher:create-session',
+          );
+        else limiter.checkGameplay(socket.id);
+        if (unjoined && socket.data.membership) {
           throw new LobbyRequestError(
             'ALREADY_JOINED',
             'Esta conexión ya pertenece a una partida.',
@@ -117,6 +124,7 @@ export function registerLobbyHandlers(
           lobby: getLobbySnapshot(session),
         });
         logger({ event: 'session_created', sessionId: session.id });
+        game.restore(socket);
       });
     });
 
@@ -135,6 +143,7 @@ export function registerLobbyHandlers(
           lobby: getLobbySnapshot(session),
         });
         logger({ event: 'teacher_reconnected', sessionId: session.id });
+        game.restore(socket);
       });
     });
 
@@ -163,6 +172,7 @@ export function registerLobbyHandlers(
           sessionId: session.id,
           participantId: participant.id,
         });
+        game.restore(socket);
       });
     });
 
@@ -202,8 +212,11 @@ export function registerLobbyHandlers(
           sessionId: session.id,
           participantId,
         });
+        game.restore(socket);
       });
     });
+
+    game.register(socket, (operation, action) => run(operation, action, false));
 
     socket.on('disconnect', () => {
       const membership = socket.data.membership;
@@ -227,4 +240,5 @@ export function registerLobbyHandlers(
       }
     });
   });
+  return game;
 }

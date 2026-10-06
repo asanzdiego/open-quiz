@@ -6,6 +6,7 @@ import type {
   TeacherReconnectPayload,
   StudentJoinPayload,
   StudentReconnectPayload,
+  StudentAnswerPayload,
 } from './events.ts';
 
 export class LobbyRequestError extends Error {
@@ -14,6 +15,14 @@ export class LobbyRequestError extends Error {
     super(message);
     this.code = code;
   }
+}
+
+export function parseStudentAnswer(payload: unknown): StudentAnswerPayload {
+  const input = object(payload, ['questionId', 'answerOptionId']);
+  return {
+    questionId: uuid(input.questionId),
+    answerOptionId: uuid(input.answerOptionId),
+  };
 }
 
 function object(payload: unknown, keys: string[]): Record<string, unknown> {

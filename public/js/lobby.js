@@ -131,6 +131,7 @@ export function createLobbyConnection(role, onReady) {
         persist(null);
         form.hidden = false;
         lobby.hidden = true;
+        document.getElementById('game').hidden = true;
       } else {
         retry.hidden = false;
       }
@@ -144,10 +145,11 @@ export function createLobbyConnection(role, onReady) {
   retry.addEventListener('click', restore);
   socket.connect();
 
-  return (event, payload) => {
+  function send(event, payload) {
     if (!socket.connected || pending) return;
     error.hidden = true;
     setPending(true);
     socket.emit(event, payload);
-  };
+  }
+  return { send, socket };
 }

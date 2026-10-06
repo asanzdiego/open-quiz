@@ -4,6 +4,7 @@ import { MAX_NICK_LENGTH } from '../src/domain/participant/participant.ts';
 import { InMemorySessionRepository } from '../src/domain/session/in-memory-session-repository.ts';
 import { type SessionState } from '../src/domain/session/session.ts';
 import { SessionService } from '../src/services/session-service.ts';
+import { gameWorkbook } from './helpers/game-fixture.ts';
 
 function expectDomainError(action: () => unknown, code: DomainErrorCode): void {
   try {
@@ -28,8 +29,8 @@ describe('Servicio de sesiones', () => {
   });
 
   it('crea sesiones en LOBBY con UUID, código y token de profesor independientes', () => {
-    const first = service.createSession();
-    const second = service.createSession();
+    const first = service.createSession(gameWorkbook);
+    const second = service.createSession(gameWorkbook);
     expect(first.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(first.teacherToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(first.state).toBe('LOBBY');
@@ -50,8 +51,8 @@ describe('Servicio de sesiones', () => {
       .mockReturnValueOnce('ABC234')
       .mockReturnValueOnce('DEF567');
     service = new SessionService(repository, { joinCodeGenerator: generator });
-    const first = service.createSession();
-    const second = service.createSession();
+    const first = service.createSession(gameWorkbook);
+    const second = service.createSession(gameWorkbook);
     expect(first.joinCode).toBe('ABC234');
     expect(second.joinCode).toBe('DEF567');
     expect(generator).toHaveBeenCalledTimes(3);
@@ -62,8 +63,11 @@ describe('Servicio de sesiones', () => {
     service = new SessionService(repository, {
       joinCodeGenerator: () => 'ABC234',
     });
-    service.createSession();
-    expectDomainError(() => service.createSession(), 'JOIN_CODE_UNAVAILABLE');
+    service.createSession(gameWorkbook);
+    expectDomainError(
+      () => service.createSession(gameWorkbook),
+      'JOIN_CODE_UNAVAILABLE',
+    );
     expect(repository.size).toBe(1);
   });
 
@@ -71,12 +75,15 @@ describe('Servicio de sesiones', () => {
     service = new SessionService(repository, {
       joinCodeGenerator: () => 'OOOOOO',
     });
-    expectDomainError(() => service.createSession(), 'JOIN_CODE_UNAVAILABLE');
+    expectDomainError(
+      () => service.createSession(gameWorkbook),
+      'JOIN_CODE_UNAVAILABLE',
+    );
     expect(repository.size).toBe(0);
   });
 
   it('recorre los estados sin avanzar automáticamente y conserva la fecha de finalización', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     const states: SessionState[] = [
       'QUESTION_ACTIVE',
       'QUESTION_RESULTS',
@@ -99,7 +106,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('permite terminar una sala de espera', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     expect(
       service.transitionSession(session.id, session.teacherToken, 'FINISHED')
         .state,
@@ -107,7 +114,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('rechaza saltos, transiciones repetidas y la reapertura de una partida terminada', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     const transition = (state: SessionState) =>
       service.transitionSession(session.id, session.teacherToken, state);
     expectDomainError(
@@ -132,8 +139,8 @@ describe('Servicio de sesiones', () => {
   });
 
   it('exige el token del profesor de esa sesión, y el código de acceso no sirve como secreto', () => {
-    const first = service.createSession();
-    const second = service.createSession();
+    const first = service.createSession(gameWorkbook);
+    const second = service.createSession(gameWorkbook);
     for (const token of ['', first.joinCode, second.teacherToken]) {
       expectDomainError(
         () => service.transitionSession(first.id, token, 'QUESTION_ACTIVE'),
@@ -144,7 +151,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('incorpora participantes con nick recortado, UUID y token propio', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     now = 1500;
     const participant = service.joinSession(
       ` ${session.joinCode.toLowerCase()} `,
@@ -166,7 +173,7 @@ describe('Servicio de sesiones', () => {
   it.each(['', '   ', 'a'.repeat(MAX_NICK_LENGTH + 1), 'Ana\u0000María'])(
     'rechaza el nick inválido %j sin crear participante',
     (nick) => {
-      const session = service.createSession();
+      const session = service.createSession(gameWorkbook);
       expectDomainError(
         () => service.joinSession(session.joinCode, nick, 'socket-1'),
         'INVALID_NICK',
@@ -176,7 +183,7 @@ describe('Servicio de sesiones', () => {
   );
 
   it('acepta el límite del nick y cuenta caracteres Unicode completos', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     expect(
       service.joinSession(
         session.joinCode,
@@ -187,7 +194,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('rechaza nicks duplicados sin distinguir mayúsculas o representación Unicode', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     service.joinSession(session.joinCode, 'José', 'socket-1');
     expectDomainError(
       () => service.joinSession(session.joinCode, ' JOSÉ ', 'socket-2'),
@@ -200,7 +207,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('reserva también el nick de un participante desconectado', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     const participant = service.joinSession(
       session.joinCode,
       'Ana',
@@ -214,8 +221,8 @@ describe('Servicio de sesiones', () => {
   });
 
   it('mantiene aislados los participantes y los estados de varias partidas', () => {
-    const first = service.createSession();
-    const second = service.createSession();
+    const first = service.createSession(gameWorkbook);
+    const second = service.createSession(gameWorkbook);
     const firstParticipant = service.joinSession(
       first.joinCode,
       'Ana',
@@ -248,7 +255,7 @@ describe('Servicio de sesiones', () => {
   it.each<SessionState>(['QUESTION_ACTIVE', 'QUESTION_RESULTS', 'FINISHED'])(
     'no incorpora nuevos participantes en %s',
     (state) => {
-      const session = service.createSession();
+      const session = service.createSession(gameWorkbook);
       if (state === 'FINISHED') {
         service.transitionSession(session.id, session.teacherToken, state);
       } else {
@@ -268,13 +275,13 @@ describe('Servicio de sesiones', () => {
   );
 
   it('recupera el participante y su puntuación con ID y token durante una pregunta', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     const participant = service.joinSession(
       session.joinCode,
       'Ana',
       'socket-1',
     );
-    // Fixture de puntos: el cálculo y la aplicación por pregunta se conectarán en la Fase 6.
+    // Fixture de puntos previos para aislar la prueba de reconexión.
     const stored = repository
       .getById(session.id)
       ?.participants.get(participant.id);
@@ -307,7 +314,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('rechaza tokens de reconexión incorrectos y no permite recuperar por nick', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     const first = service.joinSession(session.joinCode, 'Ana', 'socket-1');
     const second = service.joinSession(session.joinCode, 'Luis', 'socket-2');
     for (const token of ['', second.reconnectToken, session.teacherToken]) {
@@ -338,7 +345,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('ignora una desconexión tardía del socket sustituido al reconectar', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     const participant = service.joinSession(
       session.joinCode,
       'Ana',
@@ -365,7 +372,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('rechaza una conexión vacía antes de modificar los participantes', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     expectDomainError(
       () => service.joinSession(session.joinCode, 'Ana', ' '),
       'INVALID_SOCKET_ID',
@@ -391,7 +398,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('devuelve copias que no pueden alterar el estado interno', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     const participant = service.joinSession(
       session.joinCode,
       'Ana',
@@ -417,7 +424,7 @@ describe('Servicio de sesiones', () => {
       () => service.joinSession('XXXXXX', 'Ana', 'socket-1'),
       'SESSION_NOT_FOUND',
     );
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     expectDomainError(
       () =>
         service.disconnectParticipant(session.id, 'inexistente', 'socket-1'),
@@ -426,8 +433,8 @@ describe('Servicio de sesiones', () => {
   });
 
   it('limpia partidas terminadas por finishedAt y abandonadas por lastActivityAt, incluidos sus códigos', () => {
-    const abandoned = service.createSession();
-    const finished = service.createSession();
+    const abandoned = service.createSession(gameWorkbook);
+    const finished = service.createSession(gameWorkbook);
     const participant = service.joinSession(
       finished.joinCode,
       'Ana',
@@ -454,7 +461,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('la actividad del participante renueva el TTL de una partida sin terminar', () => {
-    const session = service.createSession();
+    const session = service.createSession(gameWorkbook);
     now = 1500;
     service.joinSession(session.joinCode, 'Ana', 'socket-1');
     now = 2000;
@@ -468,7 +475,7 @@ describe('Servicio de sesiones', () => {
   });
 
   it('rechaza TTL inválidos sin eliminar partidas', () => {
-    service.createSession();
+    service.createSession(gameWorkbook);
     for (const invalid of [0, -1, 0.5, NaN, Infinity]) {
       expect(() =>
         service.cleanupExpired({
