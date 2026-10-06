@@ -16,6 +16,7 @@ import {
   assertSessionTransition,
   type Session,
   type SessionState,
+  type SessionWorkbook,
 } from '../domain/session/session.ts';
 
 interface SessionServiceOptions {
@@ -42,7 +43,7 @@ export class SessionService {
     this.#joinCodeGenerator = options.joinCodeGenerator ?? generateJoinCode;
   }
 
-  createSession(): Session {
+  createSession(workbook?: SessionWorkbook): Session {
     let joinCode: string | undefined;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const candidate = this.#joinCodeGenerator();
@@ -76,6 +77,8 @@ export class SessionService {
       joinCode,
       teacherToken: generateSecretToken(),
       state: 'LOBBY',
+      workbookReference: workbook?.reference ?? null,
+      questions: structuredClone(workbook?.questions ?? []),
       participants: new Map(),
       createdAt: now,
       lastActivityAt: now,
@@ -90,18 +93,24 @@ export class SessionService {
     return structuredClone(this.#requireSession(id));
   }
 
+  getSessionByJoinCode(joinCode: string): Session {
+    return structuredClone(this.#requireSessionByCode(joinCode));
+  }
+
+  reconnectTeacher(id: string, teacherToken: string): Session {
+    const session = this.#requireSession(id);
+    this.#authorizeTeacher(session, teacherToken);
+    session.lastActivityAt = this.#now();
+    return structuredClone(session);
+  }
+
   transitionSession(
     id: string,
     teacherToken: string,
     nextState: SessionState,
   ): Session {
     const session = this.#requireSession(id);
-    if (!tokensMatch(session.teacherToken, teacherToken)) {
-      throw new DomainError(
-        'INVALID_TEACHER_TOKEN',
-        'No tienes permiso para controlar esta partida.',
-      );
-    }
+    this.#authorizeTeacher(session, teacherToken);
     assertSessionTransition(session.state, nextState);
 
     session.state = nextState;
@@ -231,6 +240,15 @@ export class SessionService {
         'El participante no existe en esta partida.',
       );
     return participant;
+  }
+
+  #authorizeTeacher(session: Session, teacherToken: string): void {
+    if (!tokensMatch(session.teacherToken, teacherToken)) {
+      throw new DomainError(
+        'INVALID_TEACHER_TOKEN',
+        'No tienes permiso para controlar esta partida.',
+      );
+    }
   }
 
   #validateSocketId(socketId: string): void {

@@ -9,6 +9,8 @@ function sessionFixture(id: string, joinCode: string): Session {
     joinCode,
     teacherToken: 'token-de-prueba',
     state: 'LOBBY',
+    workbookReference: null,
+    questions: [],
     participants: new Map(),
     createdAt: 1000,
     lastActivityAt: 1000,

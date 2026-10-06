@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crear partida · Open Quiz</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="/socket.io/socket.io.js" defer></script>
+    <script src="/js/teacher.js" type="module"></script>
+  </head>
+  <body>
+    <main>
+      <a href="/">Open Quiz</a>
+      <h1>Crear partida</h1>
+      <p id="connection-status" class="status" role="status">
+        Conectando con el servidor…
+      </p>
+      <p id="form-error" class="error" role="alert" hidden></p>
+      <p id="storage-warning" role="status" hidden></p>
+      <button id="retry-restore" class="button secondary" hidden>
+        Reintentar conexión con la partida
+      </button>
+      <form id="session-form">
+        <label for="workbook-reference"
+          >Ruta del fichero XLSX en Nextcloud</label
+        >
+        <input
+          id="workbook-reference"
+          name="workbookReference"
+          type="text"
+          required
+          maxlength="1024"
+          placeholder="Quiz/Matemáticas.xlsx"
+          aria-describedby="reference-help"
+        />
+        <p id="reference-help" class="hint">
+          Ruta relativa a la cuenta configurada en el servidor. Por ejemplo:
+          Quiz/Matemáticas.xlsx.
+        </p>
+        <button id="submit-button" class="button" type="submit" disabled>
+          Crear partida
+        </button>
+      </form>
+      <section id="lobby" aria-labelledby="lobby-title" hidden>
+        <h2 id="lobby-title">Sala de espera</h2>
+        <p>Comparte este código con tus alumnos:</p>
+        <p id="join-code" class="join-code"></p>
+        <p><a id="student-link">Abrir entrada de alumnos</a></p>
+        <p id="question-count"></p>
+        <p id="participant-count" role="status"></p>
+        <ul id="participants" aria-label="Participantes"></ul>
+        <button class="button" disabled aria-describedby="start-help">
+          Iniciar
+        </button>
+        <p id="start-help" class="hint">El juego aún no está disponible.</p>
+      </section>
+      <noscript><p>Activa JavaScript para crear una partida.</p></noscript>
+    </main>
+  </body>
+</html>

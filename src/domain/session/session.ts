@@ -1,5 +1,11 @@
 import { DomainError } from '../errors.ts';
 import type { Participant } from '../participant/participant.ts';
+import type { Question } from '../question/question.ts';
+
+export interface SessionWorkbook {
+  reference: string;
+  questions: readonly Question[];
+}
 
 export type SessionState =
   'LOBBY' | 'QUESTION_ACTIVE' | 'QUESTION_RESULTS' | 'FINISHED';
@@ -10,6 +16,8 @@ export interface Session {
   readonly joinCode: string;
   readonly teacherToken: string;
   readonly createdAt: number;
+  readonly workbookReference: string | null;
+  readonly questions: readonly Question[];
   state: SessionState;
   lastActivityAt: number;
   finishedAt: number | null;

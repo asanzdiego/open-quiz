@@ -3,7 +3,7 @@ import { readConfig } from './config/env.ts';
 
 function startServer() {
   const config = readConfig();
-  const { httpServer, io } = createApplication();
+  const { httpServer, io } = createApplication({ config });
 
   httpServer.once('error', () => {
     console.error(
@@ -42,7 +42,7 @@ try {
     JSON.stringify({
       event: 'server_config_invalid',
       message:
-        'Configuración inválida: revisa PORT, NODE_ENV y las variables NEXTCLOUD_* del servidor.',
+        'Configuración inválida: revisa PORT, NODE_ENV, los TTL y las variables NEXTCLOUD_* del servidor.',
     }),
   );
   process.exitCode = 1;

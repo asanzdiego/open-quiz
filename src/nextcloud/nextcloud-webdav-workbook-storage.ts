@@ -5,6 +5,7 @@ import {
 } from '../config/nextcloud.ts';
 import type { WorkbookStorage } from '../services/workbook-storage.ts';
 import { WorkbookStorageError } from '../services/workbook-storage-error.ts';
+import { normalizeWorkbookReference } from '../services/workbook-reference.ts';
 
 type WorkbookWebDavClient = Pick<
   WebDAVClient,
@@ -12,20 +13,8 @@ type WorkbookWebDavClient = Pick<
 >;
 
 function workbookPath(reference: string): string {
-  if (typeof reference !== 'string' || /[\\:\p{Cc}]/u.test(reference)) {
-    throw new WorkbookStorageError('INVALID_REFERENCE');
-  }
-  const path = reference.trim().replace(/^\//u, '');
-  if (
-    path.length === 0 ||
-    path.length > 1024 ||
-    !/\.xlsx$/iu.test(path) ||
-    path.split('/').some((part) => part === '' || part === '.' || part === '..')
-  ) {
-    throw new WorkbookStorageError('INVALID_REFERENCE');
-  }
   // El cliente WebDAV codifica cada segmento. No decodificar ni tratar la referencia como URL.
-  return `/${path}`;
+  return `/${normalizeWorkbookReference(reference)}`;
 }
 
 function storageError(

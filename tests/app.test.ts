@@ -49,6 +49,11 @@ describe('Servidor HTTP y Socket.IO', () => {
   it.each([
     ['/css/styles.css', /css/],
     ['/js/main.js', /javascript/],
+    ['/teacher.html', /html/],
+    ['/student.html', /html/],
+    ['/js/teacher.js', /javascript/],
+    ['/js/student.js', /javascript/],
+    ['/js/lobby.js', /javascript/],
     ['/socket.io/socket.io.js', /javascript/],
   ])('sirve el recurso %s', async (path, contentType) => {
     await request(httpServer)
@@ -81,6 +86,30 @@ describe('Servidor HTTP y Socket.IO', () => {
         });
 
         expect(client.connected).toBe(true);
+      } finally {
+        client.disconnect();
+      }
+    },
+  );
+
+  it.each(['polling', 'websocket'])(
+    'rechaza un origen externo mediante %s',
+    async (transport) => {
+      const client = connect(baseUrl, {
+        transports: [transport],
+        autoConnect: false,
+        reconnection: false,
+        extraHeaders: { Origin: 'https://otro.example.com' },
+        timeout: 2000,
+      });
+      try {
+        const connection = new Promise<void>((resolve, reject) => {
+          client.once('connect', resolve);
+          client.once('connect_error', reject);
+          client.connect();
+        });
+        await expect(connection).rejects.toBeInstanceOf(Error);
+        expect(client.connected).toBe(false);
       } finally {
         client.disconnect();
       }

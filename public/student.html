@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Entrar como alumno · Open Quiz</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="/socket.io/socket.io.js" defer></script>
+    <script src="/js/student.js" type="module"></script>
+  </head>
+  <body>
+    <main>
+      <a href="/">Open Quiz</a>
+      <h1>Entrar a la partida</h1>
+      <p id="connection-status" class="status" role="status">
+        Conectando con el servidor…
+      </p>
+      <p id="form-error" class="error" role="alert" hidden></p>
+      <p id="storage-warning" role="status" hidden></p>
+      <button id="retry-restore" class="button secondary" hidden>
+        Reintentar conexión con la partida
+      </button>
+      <form id="session-form">
+        <label for="join-code-input">Código de partida</label>
+        <input
+          id="join-code-input"
+          name="joinCode"
+          type="text"
+          required
+          maxlength="6"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          placeholder="XF82KP"
+        />
+        <label for="nick">Nick</label>
+        <input
+          id="nick"
+          name="nick"
+          type="text"
+          required
+          maxlength="48"
+          autocomplete="nickname"
+          aria-describedby="nick-help"
+        />
+        <p id="nick-help" class="hint">
+          Elige un nick de hasta 24 caracteres que no esté siendo usado en esta
+          partida.
+        </p>
+        <button id="submit-button" class="button" type="submit" disabled>
+          Entrar
+        </button>
+      </form>
+      <section id="lobby" aria-labelledby="lobby-title" hidden>
+        <h2 id="lobby-title">Ya estás en la sala</h2>
+        <p>Te has unido como: <strong id="joined-nick"></strong></p>
+        <p>Esperando al profesor…</p>
+        <p id="participant-count" role="status"></p>
+        <ul id="participants" aria-label="Participantes"></ul>
+      </section>
+      <noscript><p>Activa JavaScript para entrar a la partida.</p></noscript>
+    </main>
+  </body>
+</html>

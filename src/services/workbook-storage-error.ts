@@ -1,4 +1,6 @@
 const messages = {
+  STORAGE_NOT_CONFIGURED:
+    'Nextcloud no está configurado. Configura las variables NEXTCLOUD_* en el servidor para crear partidas.',
   INVALID_REFERENCE:
     'Indica una ruta de fichero .xlsx válida dentro de Nextcloud.',
   INVALID_DATA: 'El contenido del fichero debe ser un Buffer no vacío.',

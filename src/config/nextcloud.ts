@@ -79,7 +79,7 @@ export function validateNextcloudConfig(
   return { ...config, webdavUrl: url.href };
 }
 
-/** Nextcloud es opcional hasta integrar la creación de partidas en la Fase 5. */
+/** Sin Nextcloud el servidor arranca, pero la creación de partidas devuelve un error seguro. */
 export function readNextcloudConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): NextcloudConfig | undefined {

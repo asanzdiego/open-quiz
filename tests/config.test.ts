@@ -7,6 +7,8 @@ describe('Configuración', () => {
       port: 3000,
       nodeEnv: 'development',
       nextcloud: undefined,
+      sessionTtlMs: 120 * 60_000,
+      finishedSessionTtlMs: 30 * 60_000,
     });
   });
 
@@ -15,6 +17,8 @@ describe('Configuración', () => {
       port: 8080,
       nodeEnv: 'production',
       nextcloud: undefined,
+      sessionTtlMs: 120 * 60_000,
+      finishedSessionTtlMs: 30 * 60_000,
     });
   });
 
@@ -28,4 +32,28 @@ describe('Configuración', () => {
   it('rechaza un entorno desconocido', () => {
     expect(() => readConfig({ NODE_ENV: 'desconocido' })).toThrow('NODE_ENV');
   });
+
+  it('lee los TTL de sesiones desde el entorno', () => {
+    expect(
+      readConfig({
+        SESSION_TTL_MINUTES: '90',
+        FINISHED_SESSION_TTL_MINUTES: '10',
+      }),
+    ).toMatchObject({
+      sessionTtlMs: 90 * 60_000,
+      finishedSessionTtlMs: 10 * 60_000,
+    });
+  });
+
+  it.each(['', '0', '-1', '1.5', 'abc', ' 30 ', '99999999999999999999'])(
+    'rechaza TTL inválidos: %j',
+    (value) => {
+      expect(() => readConfig({ SESSION_TTL_MINUTES: value })).toThrow(
+        'SESSION_TTL_MINUTES',
+      );
+      expect(() => readConfig({ FINISHED_SESSION_TTL_MINUTES: value })).toThrow(
+        'FINISHED_SESSION_TTL_MINUTES',
+      );
+    },
+  );
 });
