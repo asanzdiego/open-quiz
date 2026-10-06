@@ -1,14 +1,28 @@
+import { setConnectionStatus } from './ui.js';
+
 const statusElement = document.getElementById('connection-status');
 const socket = io();
 
 socket.on('connect', () => {
-  statusElement.textContent = 'Conexión en tiempo real disponible.';
+  setConnectionStatus(
+    statusElement,
+    'connected',
+    'Conexión en tiempo real disponible.',
+  );
 });
 
 socket.on('disconnect', () => {
-  statusElement.textContent = 'Conexión interrumpida. Intentando reconectar…';
+  setConnectionStatus(
+    statusElement,
+    'disconnected',
+    'Conexión interrumpida. Intentando reconectar…',
+  );
 });
 
 socket.on('connect_error', () => {
-  statusElement.textContent = 'No se ha podido conectar. Intentando de nuevo…';
+  setConnectionStatus(
+    statusElement,
+    'disconnected',
+    'No se ha podido conectar. Intentando de nuevo…',
+  );
 });

@@ -3,138 +3,227 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#164e46" />
+    <meta
+      name="description"
+      content="Open Quiz, cuestionarios para compartir en el aula."
+    />
     <title>Crear partida · Open Quiz</title>
     <link rel="stylesheet" href="/css/styles.css" />
     <script src="/socket.io/socket.io.js" defer></script>
     <script src="/js/teacher.js" type="module"></script>
   </head>
-  <body>
-    <main>
-      <a href="/">Open Quiz</a>
-      <h1>Crear partida</h1>
-      <p id="connection-status" class="status" role="status">
+  <body data-role="teacher">
+    <a class="skip-link" href="#main-content">Saltar al contenido</a>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Open Quiz, inicio"
+        ><span class="brand-mark" aria-hidden="true">OQ</span>Open Quiz</a
+      ><span class="role-label">Profesor</span>
+    </header>
+    <main id="main-content" class="page-shell" tabindex="-1">
+      <div class="page-heading">
+        <p class="eyebrow">Tú marcas el ritmo</p>
+        <h1 id="page-title">Crear partida</h1>
+      </div>
+      <p
+        id="connection-status"
+        class="status"
+        role="status"
+        data-state="connecting"
+      >
         Conectando con el servidor…
       </p>
-      <p id="form-error" class="error" role="alert" hidden></p>
-      <p id="storage-warning" role="status" hidden></p>
-      <button id="retry-restore" class="button secondary" hidden>
-        Reintentar conexión con la partida
+      <p id="form-error" class="error" role="alert" tabindex="-1" hidden></p>
+      <p id="storage-warning" class="notice" role="status" hidden></p>
+      <button id="retry-restore" class="button secondary" type="button" hidden>
+        Reconectar a la partida
       </button>
-      <form id="session-form">
-        <label for="workbook-reference"
-          >Ruta del fichero XLSX en Nextcloud</label
-        >
-        <input
+      <form id="session-form" class="panel entry-form">
+        <h2>Tu cuestionario en Nextcloud</h2>
+        <p>
+          Indica dónde está el Excel con las preguntas. Los resultados se
+          guardarán en ese mismo libro.
+        </p>
+        <label for="workbook-reference">Ruta del fichero XLSX</label
+        ><input
           id="workbook-reference"
           name="workbookReference"
           type="text"
           required
           maxlength="1024"
           placeholder="Quiz/Matemáticas.xlsx"
+          autocomplete="off"
+          spellcheck="false"
           aria-describedby="reference-help"
         />
         <p id="reference-help" class="hint">
-          Ruta relativa a la cuenta configurada en el servidor. Por ejemplo:
-          Quiz/Matemáticas.xlsx.
+          Por ejemplo, Quiz/Matemáticas.xlsx. Usa la ruta dentro de Nextcloud.
         </p>
         <button id="submit-button" class="button" type="submit" disabled>
           Crear partida
         </button>
       </form>
       <section id="lobby" aria-labelledby="lobby-title" hidden>
-        <h2 id="lobby-title">Sala de espera</h2>
-        <p>Comparte este código con tus alumnos:</p>
-        <p id="join-code" class="join-code"></p>
-        <p><a id="student-link">Abrir entrada de alumnos</a></p>
-        <p id="question-count"></p>
-        <p id="participant-count" role="status"></p>
-        <ul id="participants" aria-label="Participantes"></ul>
-        <button
-          id="start-game"
-          class="button"
-          data-game-event="teacher:start-game"
-          disabled
-        >
-          Iniciar
-        </button>
-        <button
-          class="button secondary"
-          data-game-event="teacher:end-game"
-          disabled
-        >
-          Finalizar partida
-        </button>
-      </section>
-      <section id="game" aria-labelledby="game-title" hidden>
-        <h2 id="game-title"></h2>
-        <div id="question-panel">
-          <p id="question-number"></p>
-          <h3 id="question-text"></h3>
-          <p id="countdown-panel">
-            Tiempo restante: <strong id="countdown"></strong>
-          </p>
-          <div
-            id="answer-options"
-            class="answer-options"
-            aria-label="Opciones de respuesta"
-          ></div>
-          <p id="answer-count" role="status"></p>
+        <h2 id="lobby-title" tabindex="-1">Sala de espera</h2>
+        <div class="lobby-grid">
+          <div class="panel share-panel">
+            <p class="eyebrow">Código de partida</p>
+            <p
+              id="join-code"
+              class="join-code"
+              aria-label="Código de partida"
+            ></p>
+            <p>Los alumnos pueden entrar con este código o con el enlace:</p>
+            <a id="student-link" class="student-link"></a>
+            <div class="actions share-actions">
+              <button id="copy-code" class="button secondary" type="button">
+                Copiar código</button
+              ><button id="copy-link" class="button secondary" type="button">
+                Copiar enlace
+              </button>
+            </div>
+            <p id="share-feedback" class="hint" role="status"></p>
+            <p id="question-count" class="question-count"></p>
+          </div>
+          <div class="panel">
+            <h3>Tu clase</h3>
+            <p id="participant-count" class="hint" role="status"></p>
+            <p id="lobby-empty" class="empty-state">
+              La sala está lista. Comparte el código para que entre el primer
+              alumno.
+            </p>
+            <ul
+              id="participants"
+              class="participants"
+              aria-label="Participantes"
+            ></ul>
+          </div>
         </div>
-        <p id="answer-feedback" hidden></p>
-        <div id="question-result" hidden>
-          <p id="correct-answer"></p>
-          <p id="question-statistics"></p>
-        </div>
-        <p
-          id="workbook-save-status"
-          role="status"
-          aria-live="polite"
-          hidden
-        ></p>
-        <div id="podium-panel" hidden>
-          <h3>Podio</h3>
-          <ol id="podium" class="ranking"></ol>
-        </div>
-        <div id="ranking-panel" hidden>
-          <h3>Clasificación</h3>
-          <ol id="ranking" class="ranking"></ol>
-        </div>
-        <div class="actions">
+        <div class="actions game-actions">
           <button
-            id="retry-save-results"
+            id="start-game"
             class="button"
-            data-game-event="teacher:retry-save-results"
-            hidden
+            type="button"
+            data-game-event="teacher:start-game"
+            disabled
           >
-            Reintentar guardado
-          </button>
-          <button
-            id="close-question"
-            class="button"
-            data-game-event="teacher:close-question"
-            hidden
-          >
-            Cerrar pregunta
-          </button>
-          <button
-            id="next-question"
-            class="button"
-            data-game-event="teacher:start-next-question"
-            hidden
-          >
-            Siguiente pregunta
-          </button>
-          <button
-            id="end-game"
-            class="button secondary"
+            Iniciar partida</button
+          ><button
+            class="button quiet"
+            type="button"
             data-game-event="teacher:end-game"
-            hidden
+            disabled
           >
             Finalizar partida
           </button>
         </div>
       </section>
-      <noscript><p>Activa JavaScript para crear una partida.</p></noscript>
+      <section id="game" aria-labelledby="game-title" hidden>
+        <h2 id="game-title" tabindex="-1"></h2>
+        <div id="question-panel" class="panel question-card">
+          <div class="question-heading">
+            <p id="question-number" class="eyebrow"></p>
+            <div id="countdown-panel" class="timer">
+              <span>Tiempo restante</span><strong id="countdown"></strong
+              ><progress
+                id="time-progress"
+                max="100"
+                value="100"
+                aria-label="Tiempo restante de la pregunta"
+              ></progress>
+            </div>
+          </div>
+          <h3 id="question-text"></h3>
+          <div
+            id="answer-options"
+            class="answer-options"
+            role="group"
+            aria-label="Opciones de respuesta"
+          ></div>
+          <div class="response-progress">
+            <p id="answer-count" role="status"></p>
+            <progress
+              id="response-progress"
+              max="1"
+              value="0"
+              aria-label="Alumnos que han respondido"
+            ></progress>
+          </div>
+        </div>
+        <p id="timer-announcement" class="sr-only" role="status"></p>
+        <p
+          id="answer-feedback"
+          class="notice answer-feedback"
+          role="status"
+          hidden
+        ></p>
+        <div id="question-result" class="panel result-panel" hidden>
+          <p class="eyebrow">Pregunta cerrada</p>
+          <p id="correct-answer" class="correct-answer"></p>
+          <div
+            id="question-statistics"
+            class="metrics"
+            aria-label="Estadísticas de la pregunta"
+          ></div>
+        </div>
+        <p id="workbook-save-status" class="notice" role="status" hidden></p>
+        <div class="results-grid">
+          <div id="podium-panel" class="panel podium-panel" hidden>
+            <p class="eyebrow">¡Bien jugado!</p>
+            <h3>Podio de la clase</h3>
+            <ol id="podium" class="podium"></ol>
+          </div>
+          <div id="ranking-panel" class="panel" hidden>
+            <h3>Clasificación</h3>
+            <p class="hint">En caso de empate, cuenta el orden de entrada.</p>
+            <ol id="ranking" class="ranking"></ol>
+          </div>
+        </div>
+        <div class="actions game-actions">
+          <button
+            id="retry-save-results"
+            class="button"
+            type="button"
+            data-game-event="teacher:retry-save-results"
+            hidden
+          >
+            Reintentar guardado</button
+          ><button
+            id="close-question"
+            class="button"
+            type="button"
+            data-game-event="teacher:close-question"
+            hidden
+          >
+            Cerrar pregunta</button
+          ><button
+            id="next-question"
+            class="button"
+            type="button"
+            data-game-event="teacher:start-next-question"
+            hidden
+          >
+            Siguiente pregunta</button
+          ><button
+            id="end-game"
+            class="button quiet"
+            type="button"
+            data-game-event="teacher:end-game"
+            hidden
+          >
+            Finalizar partida
+          </button>
+          <button id="new-session" class="button" type="button" hidden>
+            Crear otra partida
+          </button>
+        </div>
+      </section>
+      <noscript
+        ><p class="notice">
+          Activa JavaScript para participar en tiempo real.
+        </p></noscript
+      >
     </main>
+    <footer class="site-footer">Open Quiz · Aprender juntos</footer>
   </body>
 </html>

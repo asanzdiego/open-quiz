@@ -55,6 +55,7 @@ describe('Servidor HTTP y Socket.IO', () => {
     ['/js/student.js', /javascript/],
     ['/js/lobby.js', /javascript/],
     ['/js/game.js', /javascript/],
+    ['/js/ui.js', /javascript/],
     ['/socket.io/socket.io.js', /javascript/],
   ])('sirve el recurso %s', async (path, contentType) => {
     await request(httpServer)

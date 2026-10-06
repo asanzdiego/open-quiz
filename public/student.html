@@ -3,93 +3,173 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#164e46" />
+    <meta
+      name="description"
+      content="Open Quiz, cuestionarios para compartir en el aula."
+    />
     <title>Entrar como alumno · Open Quiz</title>
     <link rel="stylesheet" href="/css/styles.css" />
     <script src="/socket.io/socket.io.js" defer></script>
     <script src="/js/student.js" type="module"></script>
   </head>
-  <body>
-    <main>
-      <a href="/">Open Quiz</a>
-      <h1>Entrar a la partida</h1>
-      <p id="connection-status" class="status" role="status">
+  <body data-role="student">
+    <a class="skip-link" href="#main-content">Saltar al contenido</a>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Open Quiz, inicio"
+        ><span class="brand-mark" aria-hidden="true">OQ</span>Open Quiz</a
+      ><span id="player-label" class="role-label">Alumno</span>
+    </header>
+    <main id="main-content" class="page-shell student-shell" tabindex="-1">
+      <div class="page-heading">
+        <p class="eyebrow">Tu clase te espera</p>
+        <h1 id="page-title">Entrar a la partida</h1>
+      </div>
+      <p
+        id="connection-status"
+        class="status"
+        role="status"
+        data-state="connecting"
+      >
         Conectando con el servidor…
       </p>
-      <p id="form-error" class="error" role="alert" hidden></p>
-      <p id="storage-warning" role="status" hidden></p>
-      <button id="retry-restore" class="button secondary" hidden>
-        Reintentar conexión con la partida
+      <p id="form-error" class="error" role="alert" tabindex="-1" hidden></p>
+      <p id="storage-warning" class="notice" role="status" hidden></p>
+      <button id="retry-restore" class="button secondary" type="button" hidden>
+        Reconectar a la partida
       </button>
-      <form id="session-form">
-        <label for="join-code-input">Código de partida</label>
-        <input
+      <form id="session-form" class="panel entry-form">
+        <h2>Vamos a participar</h2>
+        <p>Pide el código a tu profesor y elige cómo te verá la clase.</p>
+        <label for="join-code-input">Código de partida</label
+        ><input
           id="join-code-input"
+          class="code-input"
           name="joinCode"
           type="text"
           required
+          minlength="6"
           maxlength="6"
           autocomplete="off"
           autocapitalize="characters"
           spellcheck="false"
           placeholder="XF82KP"
+          aria-describedby="code-help"
         />
-        <label for="nick">Nick</label>
-        <input
+        <p id="code-help" class="hint">
+          Los 6 caracteres que aparecen en la pantalla del profesor.
+        </p>
+        <label for="nick">Tu nick</label
+        ><input
           id="nick"
           name="nick"
           type="text"
           required
           maxlength="48"
           autocomplete="nickname"
+          placeholder="¿Cómo te llamamos?"
           aria-describedby="nick-help"
         />
         <p id="nick-help" class="hint">
-          Elige un nick de hasta 24 caracteres que no esté siendo usado en esta
-          partida.
+          Hasta 24 caracteres. Elige uno que nadie esté usando en esta partida.
         </p>
         <button id="submit-button" class="button" type="submit" disabled>
           Entrar
         </button>
       </form>
       <section id="lobby" aria-labelledby="lobby-title" hidden>
-        <h2 id="lobby-title">Ya estás en la sala</h2>
-        <p>Te has unido como: <strong id="joined-nick"></strong></p>
-        <p>Esperando al profesor…</p>
-        <p id="participant-count" role="status"></p>
-        <ul id="participants" aria-label="Participantes"></ul>
+        <div class="panel waiting-panel">
+          <span class="waiting-symbol" aria-hidden="true">…</span>
+          <h2 id="lobby-title" tabindex="-1">Ya estás en la sala</h2>
+          <p>Te has unido como <strong id="joined-nick"></strong>.</p>
+          <p class="intro">Esperando al profesor…</p>
+          <p class="hint">
+            La pregunta aparecerá aquí cuando empiece la partida.
+          </p>
+        </div>
+        <div class="panel classmates">
+          <h3>Tu clase</h3>
+          <p id="participant-count" class="hint" role="status"></p>
+          <p id="lobby-empty" class="empty-state">
+            La sala está lista. Comparte el código para que entre el primer
+            alumno.
+          </p>
+          <ul
+            id="participants"
+            class="participants"
+            aria-label="Participantes"
+          ></ul>
+        </div>
       </section>
       <section id="game" aria-labelledby="game-title" hidden>
-        <h2 id="game-title"></h2>
-        <div id="question-panel">
-          <p id="question-number"></p>
+        <h2 id="game-title" tabindex="-1"></h2>
+        <div id="question-panel" class="panel question-card">
+          <div class="question-heading">
+            <p id="question-number" class="eyebrow"></p>
+            <div id="countdown-panel" class="timer">
+              <span>Tiempo restante</span><strong id="countdown"></strong
+              ><progress
+                id="time-progress"
+                max="100"
+                value="100"
+                aria-label="Tiempo restante de la pregunta"
+              ></progress>
+            </div>
+          </div>
           <h3 id="question-text"></h3>
-          <p id="countdown-panel">
-            Tiempo restante: <strong id="countdown"></strong>
-          </p>
           <div
             id="answer-options"
             class="answer-options"
-            aria-label="Opciones de respuesta"
+            role="group"
+            aria-label="Elige una respuesta"
           ></div>
         </div>
-        <p id="answer-feedback" role="status" hidden></p>
-        <div id="question-result" hidden>
-          <p id="student-result" role="status"></p>
-          <p id="correct-answer"></p>
-          <p id="question-statistics"></p>
-          <p>Espera a que el profesor continúe.</p>
+        <p id="timer-announcement" class="sr-only" role="status"></p>
+        <p
+          id="answer-feedback"
+          class="notice answer-feedback"
+          role="status"
+          hidden
+        ></p>
+        <div id="question-result" class="panel result-panel" hidden>
+          <p id="student-result" class="result-verdict" role="status"></p>
+          <div
+            id="student-metrics"
+            class="metrics"
+            aria-label="Tus puntos y posición"
+          ></div>
+          <p id="correct-answer" class="correct-answer"></p>
+          <div
+            id="question-statistics"
+            class="metrics"
+            aria-label="Estadísticas de la pregunta"
+          ></div>
+          <p class="hint">Espera a que el profesor continúe.</p>
         </div>
-        <div id="podium-panel" hidden>
-          <p id="final-score"></p>
-          <h3>Podio</h3>
-          <ol id="podium" class="ranking"></ol>
+        <div class="results-grid">
+          <div id="podium-panel" class="panel podium-panel" hidden>
+            <p class="eyebrow">¡Bien jugado!</p>
+            <h3>Podio de la clase</h3>
+            <p id="final-score" class="final-score"></p>
+            <ol id="podium" class="podium"></ol>
+          </div>
+          <div id="ranking-panel" class="panel" hidden>
+            <h3>Clasificación</h3>
+            <ol id="ranking" class="ranking"></ol>
+          </div>
         </div>
-        <div id="ranking-panel" hidden>
-          <h3>Clasificación</h3>
-          <ol id="ranking" class="ranking"></ol>
+        <div class="actions game-actions">
+          <button id="new-session" class="button" type="button" hidden>
+            Entrar a otra partida
+          </button>
         </div>
       </section>
-      <noscript><p>Activa JavaScript para entrar a la partida.</p></noscript>
+      <noscript
+        ><p class="notice">
+          Activa JavaScript para participar en tiempo real.
+        </p></noscript
+      >
     </main>
+    <footer class="site-footer">Open Quiz · Aprender juntos</footer>
   </body>
 </html>

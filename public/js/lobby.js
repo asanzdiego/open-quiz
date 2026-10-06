@@ -1,16 +1,28 @@
+import { focusHeading, setConnectionStatus } from './ui.js';
+
 export function renderLobby(lobby) {
   const list = document.getElementById('participants');
-  const rows = lobby.participants.map((participant) => {
-    const row = document.createElement('li');
-    row.textContent = `${participant.nick} · ${participant.connected ? 'Conectado' : 'Desconectado'}`;
-    return row;
-  });
-  list.replaceChildren(...rows);
+  list.replaceChildren(
+    ...lobby.participants.map((participant) => {
+      const row = document.createElement('li');
+      row.className = 'participant';
+      row.dataset.connected = String(participant.connected);
+      const name = document.createElement('span');
+      name.className = 'participant-name';
+      name.textContent = participant.nick;
+      const state = document.createElement('span');
+      state.className = 'participant-state';
+      state.textContent = participant.connected ? 'Conectado' : 'Desconectado';
+      row.append(name, state);
+      return row;
+    }),
+  );
   const connected = lobby.participants.filter(
     (participant) => participant.connected,
   ).length;
   document.getElementById('participant-count').textContent =
     `${connected} conectados · ${lobby.participants.length} participantes`;
+  document.getElementById('lobby-empty').hidden = lobby.participants.length > 0;
 }
 
 export function createLobbyConnection(role, onReady) {
@@ -36,15 +48,26 @@ export function createLobbyConnection(role, onReady) {
   }
 
   const socket = io({ autoConnect: false });
-  function setPending(value) {
+  function setPending(value, restoring = false) {
     pending = value;
     submit.disabled = value || !socket.connected;
     form.setAttribute('aria-busy', String(value));
     submit.textContent = value
-      ? 'Conectando con la partida…'
+      ? restoring
+        ? 'Recuperando tu partida…'
+        : role === 'teacher'
+          ? 'Cargando cuestionario…'
+          : 'Entrando…'
       : role === 'teacher'
         ? 'Crear partida'
         : 'Entrar';
+  }
+  function clearError() {
+    error.hidden = true;
+    for (const input of form.querySelectorAll('input')) {
+      input.removeAttribute('aria-invalid');
+      input.removeAttribute('aria-errormessage');
+    }
   }
   function persist(value) {
     saved = value;
@@ -59,9 +82,10 @@ export function createLobbyConnection(role, onReady) {
   }
   function restore() {
     if (!saved || !socket.connected || pending) return;
-    error.hidden = true;
+    clearError();
     retry.hidden = true;
-    setPending(true);
+    setPending(true, true);
+    setConnectionStatus(status, 'connecting', 'Recuperando tu partida…');
     socket.emit(
       restoreEvent,
       role === 'teacher'
@@ -90,28 +114,42 @@ export function createLobbyConnection(role, onReady) {
     setPending(false);
     form.hidden = true;
     lobby.hidden = false;
-    error.hidden = true;
+    clearError();
     retry.hidden = true;
-    status.textContent = 'Conectado a la partida.';
+    setConnectionStatus(status, 'connected', 'Conectado a la partida.');
     onReady(payload);
     renderLobby(payload.lobby);
+    focusHeading(document.getElementById('lobby-title'));
   }
   socket.on('connect', () => {
-    status.textContent = 'Conexión en tiempo real disponible.';
+    setConnectionStatus(
+      status,
+      'connected',
+      'Conexión en tiempo real disponible.',
+    );
+    retry.hidden = true;
     setPending(false);
     if (saved) restore();
   });
   socket.on('disconnect', (reason) => {
     setPending(false);
-    retry.hidden = true;
-    status.textContent =
+    retry.hidden = reason !== 'io server disconnect';
+    setConnectionStatus(
+      status,
+      'disconnected',
       reason === 'io server disconnect'
-        ? 'La partida se ha abierto en otra pestaña. Esta conexión se ha cerrado.'
-        : 'Conexión interrumpida. Intentando reconectar…';
+        ? 'Esta partida se ha abierto en otra pestaña. Puedes reconectar aquí para continuar.'
+        : 'Conexión interrumpida. Intentando reconectar…',
+    );
   });
   socket.on('connect_error', () => {
     setPending(false);
-    status.textContent = 'No se ha podido conectar. Intentando de nuevo…';
+    retry.hidden = false;
+    setConnectionStatus(
+      status,
+      'disconnected',
+      'No se ha podido conectar. Intentando de nuevo…',
+    );
   });
   socket.on('app:error', (payload) => {
     // Un segundo envío rechazado no cancela la primera operación en curso.
@@ -119,6 +157,17 @@ export function createLobbyConnection(role, onReady) {
     setPending(false);
     error.textContent = payload.message;
     error.hidden = false;
+    const field = ['NICK_TAKEN', 'INVALID_NICK'].includes(payload.code)
+      ? document.getElementById('nick')
+      : ['SESSION_NOT_FOUND', 'INVALID_JOIN_CODE'].includes(payload.code)
+        ? document.getElementById('join-code-input')
+        : payload.operation === 'teacher:create-session'
+          ? document.getElementById('workbook-reference')
+          : null;
+    if (field && !form.hidden) {
+      field.setAttribute('aria-invalid', 'true');
+      field.setAttribute('aria-errormessage', 'form-error');
+    }
     if (payload.operation === restoreEvent) {
       const expired = [
         'SESSION_NOT_FOUND',
@@ -132,22 +181,40 @@ export function createLobbyConnection(role, onReady) {
         form.hidden = false;
         lobby.hidden = true;
         document.getElementById('game').hidden = true;
+        document.getElementById('page-title').textContent =
+          role === 'teacher' ? 'Crear partida' : 'Entrar a la partida';
+        document.title = `${role === 'teacher' ? 'Crear partida' : 'Entrar como alumno'} · Open Quiz`;
+        setConnectionStatus(
+          status,
+          'connected',
+          'Conectado al servidor. Puedes entrar a una nueva partida.',
+        );
       } else {
         retry.hidden = false;
       }
     }
+    focusHeading(error);
   });
   for (const event of role === 'teacher'
     ? ['session:created', 'session:restored']
     : ['student:joined', 'student:restored'])
     socket.on(event, ready);
   socket.on('lobby:updated', renderLobby);
-  retry.addEventListener('click', restore);
+  retry.addEventListener('click', () => {
+    if (socket.connected) restore();
+    else socket.connect();
+  });
+  document.getElementById('new-session').addEventListener('click', () => {
+    persist(null);
+    socket.disconnect();
+    window.location.assign(`/${role}.html`);
+  });
+  form.addEventListener('input', clearError);
   socket.connect();
 
   function send(event, payload) {
     if (!socket.connected || pending) return;
-    error.hidden = true;
+    clearError();
     setPending(true);
     socket.emit(event, payload);
   }

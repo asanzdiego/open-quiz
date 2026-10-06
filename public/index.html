@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#164e46" />
     <meta
       name="description"
       content="Open Quiz, cuestionarios para compartir en el aula."
@@ -10,23 +11,62 @@
     <title>Open Quiz</title>
     <link rel="stylesheet" href="/css/styles.css" />
     <script src="/socket.io/socket.io.js" defer></script>
-    <script src="/js/main.js" defer></script>
+    <script src="/js/main.js" type="module"></script>
   </head>
   <body>
-    <main>
-      <p class="eyebrow">Aprender juntos</p>
-      <h1>Open Quiz</h1>
-      <p class="intro">Cuestionarios para compartir en el aula.</p>
-      <div class="actions">
-        <a class="button" href="/teacher.html">Crear partida</a>
-        <a class="button secondary" href="/student.html">Entrar como alumno</a>
+    <a class="skip-link" href="#main-content">Saltar al contenido</a>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Open Quiz, inicio"
+        ><span class="brand-mark" aria-hidden="true">OQ</span>Open Quiz</a
+      ><span class="role-label">Aprender juntos</span>
+    </header>
+    <main id="main-content" class="home-layout" tabindex="-1">
+      <section class="welcome" aria-label="Bienvenido a Open Quiz">
+        <p class="eyebrow">El aula participa</p>
+        <h1>Open Quiz</h1>
+        <p class="intro">Una pregunta.<br />Toda la clase pensando.</p>
+        <p>
+          Crea un cuestionario desde tu Excel de Nextcloud o entra a la partida
+          de tu profesor.
+        </p>
+        <p class="hint">Sin cuentas. Solo un código y ganas de aprender.</p>
+      </section>
+      <div class="role-cards">
+        <section class="panel role-card" aria-labelledby="teacher-title">
+          <span class="role-number" aria-hidden="true">01</span>
+          <p class="eyebrow">Para el profesor</p>
+          <h2 id="teacher-title">Prepara tu partida</h2>
+          <p>Comparte el código, marca el ritmo y descubre cómo va la clase.</p>
+          <a class="button" href="/teacher.html"
+            >Crear partida <span aria-hidden="true">→</span></a
+          >
+        </section>
+        <section class="panel role-card" aria-labelledby="student-title">
+          <span class="role-number" aria-hidden="true">02</span>
+          <p class="eyebrow">Para el alumno</p>
+          <h2 id="student-title">Únete a tu clase</h2>
+          <p>
+            Introduce el código y tu nick. Puedes participar desde el móvil.
+          </p>
+          <a class="button secondary" href="/student.html"
+            >Entrar como alumno <span aria-hidden="true">→</span></a
+          >
+        </section>
       </div>
-      <p id="connection-status" class="status" role="status" aria-live="polite">
+      <p
+        id="connection-status"
+        class="status"
+        role="status"
+        data-state="connecting"
+      >
         Conectando con el servidor…
       </p>
-      <noscript>
-        <p>Activa JavaScript para comprobar la conexión en tiempo real.</p>
-      </noscript>
+      <noscript
+        ><p class="notice">
+          Activa JavaScript para participar en tiempo real.
+        </p></noscript
+      >
     </main>
+    <footer class="site-footer">Open Quiz · Aprender juntos</footer>
   </body>
 </html>

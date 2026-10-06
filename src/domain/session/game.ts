@@ -54,6 +54,7 @@ export interface GameSnapshot {
   self: {
     participantId: string;
     hasAnswered: boolean;
+    answerOptionId: string | null;
     result: StudentResult | null;
   } | null;
   serverNow: number;
@@ -183,6 +184,9 @@ export function getGameSnapshot(
           participantId,
           hasAnswered:
             session.currentRound?.answers.has(participantId) ?? false,
+          answerOptionId:
+            session.currentRound?.answers.get(participantId)?.answerOptionId ??
+            null,
           result: getStudentResult(session, participantId, ranking),
         }
       : null,

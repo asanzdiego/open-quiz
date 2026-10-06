@@ -435,7 +435,7 @@ describe('Fases 6–7: juego y guardado por Socket.IO', () => {
     expect(restored.snapshot).toMatchObject({
       state: 'QUESTION_ACTIVE',
       question,
-      self: { hasAnswered: false },
+      self: { hasAnswered: false, answerOptionId: null },
     });
     const accepted = nextEvent(restored.socket, 'answer:accepted');
     restored.socket.emit('student:answer', {
@@ -446,6 +446,7 @@ describe('Fases 6–7: juego y guardado por Socket.IO', () => {
     restored = await reconnect(a.participant);
     expect(restored.snapshot.self).toMatchObject({
       hasAnswered: true,
+      answerOptionId: question.options.find((entry) => entry.text === '4')!.id,
       result: null,
     });
     expect(JSON.stringify(restored.snapshot)).not.toMatch(
