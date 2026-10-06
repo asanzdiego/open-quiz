@@ -3,13 +3,18 @@ import { readConfig } from '../src/config/env.ts';
 
 describe('Configuración', () => {
   it('utiliza los valores predeterminados sin variables de entorno', () => {
-    expect(readConfig({})).toEqual({ port: 3000, nodeEnv: 'development' });
+    expect(readConfig({})).toEqual({
+      port: 3000,
+      nodeEnv: 'development',
+      nextcloud: undefined,
+    });
   });
 
   it('utiliza el puerto y el entorno proporcionados', () => {
     expect(readConfig({ PORT: '8080', NODE_ENV: 'production' })).toEqual({
       port: 8080,
       nodeEnv: 'production',
+      nextcloud: undefined,
     });
   });
 

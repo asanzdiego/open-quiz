@@ -17,11 +17,20 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "fixtures:excel": "node tests/fixtures/excel/generate-fixtures.ts",
+    "check:nextcloud": "node --env-file-if-exists=.env scripts/check-nextcloud.ts",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
-    "socket.io": "^4.8.4"
+    "socket.io": "^4.8.4",
+    "webdav": "^5.11.0"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

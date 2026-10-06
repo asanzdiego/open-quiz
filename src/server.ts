@@ -42,7 +42,7 @@ try {
     JSON.stringify({
       event: 'server_config_invalid',
       message:
-        'Configuración inválida: PORT debe estar entre 1 y 65535 y NODE_ENV debe ser development, test o production.',
+        'Configuración inválida: revisa PORT, NODE_ENV y las variables NEXTCLOUD_* del servidor.',
     }),
   );
   process.exitCode = 1;

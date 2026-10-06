@@ -7,7 +7,7 @@ export default [
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.ts', 'tests/**/*.ts', '*.ts', '*.mjs'],
+    files: ['src/**/*.ts', 'tests/**/*.ts', 'scripts/**/*.ts', '*.ts', '*.mjs'],
     languageOptions: { globals: globals.node },
     rules: {
       '@typescript-eslint/no-unused-vars': [

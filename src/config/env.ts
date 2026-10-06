@@ -1,6 +1,9 @@
+import { readNextcloudConfig, type NextcloudConfig } from './nextcloud.ts';
+
 export interface AppConfig {
   port: number;
   nodeEnv: 'development' | 'test' | 'production';
+  nextcloud: NextcloudConfig | undefined;
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -26,5 +29,5 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('NODE_ENV debe ser development, test o production.');
   }
 
-  return { port, nodeEnv };
+  return { port, nodeEnv, nextcloud: readNextcloudConfig(env) };
 }
