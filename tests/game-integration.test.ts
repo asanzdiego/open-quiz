@@ -372,6 +372,32 @@ describe('Fases 6–7: juego y guardado por Socket.IO', () => {
     ).toBe(1000);
   });
 
+  it('la reconexión no reinicia el límite de respuestas de un alumno ni bloquea a otro', async () => {
+    const t = await teacher();
+    const a = await student(t.session);
+    const b = await student(t.session, 'Luis');
+    const question = await start(t);
+    const payload = {
+      questionId: question.questionId,
+      answerOptionId: question.options[0]!.id,
+    };
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const accepted = nextEvent(a.socket, 'answer:accepted');
+      a.socket.emit('student:answer', payload);
+      await accepted;
+    }
+    const restored = await reconnect(a.participant);
+    const error = nextEvent(restored.socket, 'app:error');
+    restored.socket.emit('student:answer', payload);
+    expect(await error).toMatchObject({ code: 'RATE_LIMITED' });
+    const accepted = nextEvent(b.socket, 'answer:accepted');
+    b.socket.emit('student:answer', payload);
+    await accepted;
+    expect(
+      sessions.getSession(t.session.sessionId).currentRound?.answers.size,
+    ).toBe(2);
+  });
+
   it('cierra automáticamente por tiempo y espera al profesor antes de continuar', async () => {
     await new Promise<void>((resolve) => application.io.close(() => resolve()));
     application = createApplication({

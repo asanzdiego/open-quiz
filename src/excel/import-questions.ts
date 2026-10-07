@@ -2,6 +2,12 @@ import { randomUUID } from 'node:crypto';
 import ExcelJS, { type Cell, type CellValue, type Row } from 'exceljs';
 import type { Question } from '../domain/question/question.ts';
 import { ExcelImportError } from './excel-import-error.ts';
+import {
+  validateWorkbookArchive,
+  MAX_QUESTIONS,
+  MAX_QUESTION_TEXT_LENGTH,
+  MAX_ANSWER_TEXT_LENGTH,
+} from './workbook-limits.ts';
 
 export const QUESTION_HEADERS = [
   'Pregunta',
@@ -133,6 +139,7 @@ export async function importQuestions(
   data: Buffer,
   options: ImportQuestionsOptions = {},
 ): Promise<ImportedQuestions> {
+  validateWorkbookArchive(data);
   const workbook = new ExcelJS.Workbook();
   try {
     // ExcelJS declara load con un ArrayBuffer. La copia contiene solo los bytes del Buffer recibido.
@@ -206,6 +213,18 @@ export async function importQuestions(
     }
 
     validateRequiredCells(values, row);
+    if (
+      questions.length >= MAX_QUESTIONS ||
+      values.some(
+        (value, index) =>
+          value.length >
+          (index === 0 ? MAX_QUESTION_TEXT_LENGTH : MAX_ANSWER_TEXT_LENGTH),
+      )
+    )
+      throw new ExcelImportError(
+        'QUIZ_LIMIT_EXCEEDED',
+        'El cuestionario admite hasta 500 preguntas, enunciados de 2000 caracteres y respuestas de 1000 caracteres.',
+      );
     const [
       text,
       correctAnswer,

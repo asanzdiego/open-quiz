@@ -3,6 +3,7 @@ import request from 'supertest';
 import { io as connect } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../src/app.ts';
+import { readConfig } from '../src/config/env.ts';
 
 describe('Servidor HTTP y Socket.IO', () => {
   const { httpServer, io } = createApplication();
@@ -88,6 +89,97 @@ describe('Servidor HTTP y Socket.IO', () => {
         });
 
         expect(client.connected).toBe(true);
+      } finally {
+        client.disconnect();
+      }
+    },
+  );
+
+  it.each([
+    '/',
+    '/teacher.html',
+    '/student.html',
+    '/health',
+    '/inexistente',
+    '/socket.io/socket.io.js',
+  ])('aplica cabeceras de protección a %s', async (path) => {
+    const response = await request(httpServer).get(path);
+    expect(response.headers['content-security-policy']).toContain(
+      "script-src 'self'",
+    );
+    expect(response.headers['content-security-policy']).toContain(
+      "frame-ancestors 'none'",
+    );
+    expect(response.headers['content-security-policy']).not.toContain(
+      'unsafe-inline',
+    );
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['referrer-policy']).toBe('no-referrer');
+  });
+
+  it('acepta únicamente PUBLIC_ORIGIN y limita conexiones simultáneas', async () => {
+    const isolated = createApplication({
+      config: readConfig({
+        PUBLIC_ORIGIN: 'https://quiz.example.com',
+        MAX_CONNECTIONS: '1',
+      }),
+    });
+    await new Promise<void>((resolve) =>
+      isolated.httpServer.listen(0, '127.0.0.1', resolve),
+    );
+    const url = `http://127.0.0.1:${(isolated.httpServer.address() as AddressInfo).port}`;
+    const connectClient = (origin: string) =>
+      connect(url, {
+        autoConnect: false,
+        reconnection: false,
+        transports: ['websocket'],
+        extraHeaders: { Origin: origin },
+      });
+    const foreign = connectClient('https://otro.example.com');
+    const accepted = connectClient('https://quiz.example.com');
+    const overflow = connectClient('https://quiz.example.com');
+    function connection(socket: ReturnType<typeof connect>) {
+      return new Promise<void>((resolve, reject) => {
+        socket.once('connect', resolve);
+        socket.once('connect_error', reject);
+        socket.connect();
+      });
+    }
+    try {
+      await expect(connection(foreign)).rejects.toBeInstanceOf(Error);
+      await connection(accepted);
+      await expect(connection(overflow)).rejects.toBeInstanceOf(Error);
+      expect(accepted.connected).toBe(true);
+    } finally {
+      for (const socket of [foreign, accepted, overflow]) socket.disconnect();
+      await new Promise<void>((resolve) => isolated.io.close(() => resolve()));
+    }
+  });
+
+  it.each(['polling', 'websocket'])(
+    'cierra una conexión con payload excesivo mediante %s',
+    async (transport) => {
+      const client = connect(baseUrl, {
+        autoConnect: false,
+        reconnection: false,
+        transports: [transport],
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          client.once('connect', resolve);
+          client.once('connect_error', reject);
+          client.connect();
+        });
+        const disconnected = new Promise<void>((resolve) =>
+          client.once('disconnect', () => resolve()),
+        );
+        client.emit('student:join', {
+          joinCode: 'ABC234',
+          nick: 'x'.repeat(17 * 1024),
+        });
+        await disconnected;
+        expect(client.connected).toBe(false);
+        await request(httpServer).get('/health').expect(200);
       } finally {
         client.disconnect();
       }

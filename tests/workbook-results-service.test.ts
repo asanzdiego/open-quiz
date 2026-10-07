@@ -96,6 +96,50 @@ describe('Guardado de resultados y locks', () => {
     expect(upload).toHaveBeenCalledTimes(1);
   });
 
+  it('conserva puntos ante un conflicto de versión y reintenta con una descarga nueva', async () => {
+    const session = closed();
+    let version = 1;
+    const points = sessions.getGameSnapshot(session.id).ranking[0]!.totalPoints;
+    const versionedStorage = {
+      downloadWorkbook: storage.downloadWorkbook.bind(storage),
+      downloadWorkbookSnapshot: vi.fn(async (reference: string) => ({
+        data: await storage.downloadWorkbook(reference),
+        version: `"v${version}"`,
+      })),
+      uploadWorkbook: vi.fn(
+        async (
+          reference: string,
+          data: Buffer,
+          options?: { expectedVersion: string },
+        ) => {
+          expect(options?.expectedVersion).toBe(`"v${version}"`);
+          if (version === 1) {
+            version += 1;
+            throw new WorkbookStorageError('WORKBOOK_CHANGED');
+          }
+          await storage.uploadWorkbook(reference, data);
+        },
+      ),
+    };
+    service = new WorkbookResultsService(sessions, versionedStorage);
+    expect(await service.saveLatest(session.id)).toMatchObject({
+      status: 'error',
+      error: { code: 'WORKBOOK_CHANGED' },
+    });
+    expect(sessions.getGameSnapshot(session.id).ranking[0]?.totalPoints).toBe(
+      points,
+    );
+    expect(await service.saveLatest(session.id)).toMatchObject({
+      status: 'saved',
+    });
+    expect(versionedStorage.downloadWorkbookSnapshot).toHaveBeenCalledTimes(2);
+    expect((await workbook()).getWorksheet('P01')?.rowCount).toBe(2);
+    expect(sessions.getSession(session.id).completedRounds).toHaveLength(1);
+    expect(sessions.getGameSnapshot(session.id).ranking[0]?.totalPoints).toBe(
+      points,
+    );
+  });
+
   it('conserva ranking y resultados al fallar, bloquea avance y final y libera el lock para reintentar', async () => {
     const session = closed();
     const points = sessions.getGameSnapshot(session.id).ranking[0]!.totalPoints;

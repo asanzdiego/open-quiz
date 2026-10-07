@@ -27,7 +27,11 @@ async function checkNextcloud() {
     );
   }
   const storage = new NextcloudWebDavWorkbookStorage(config);
-  const data = await storage.downloadWorkbook(reference);
+  const snapshot =
+    option === '--write-back'
+      ? await storage.downloadWorkbookSnapshot(reference)
+      : undefined;
+  const data = snapshot?.data ?? (await storage.downloadWorkbook(reference));
   const imported = await importQuestions(data);
   console.info(
     JSON.stringify({
@@ -38,7 +42,9 @@ async function checkNextcloud() {
 
   if (option === '--write-back') {
     // Prueba manual sobre un fichero de prueba: vuelve a subir exactamente los mismos bytes.
-    await storage.uploadWorkbook(reference, data);
+    await storage.uploadWorkbook(reference, data, {
+      expectedVersion: snapshot!.version,
+    });
     const downloaded = await storage.downloadWorkbook(reference);
     if (!data.equals(downloaded)) {
       throw new WorkbookStorageError('INVALID_RESPONSE');

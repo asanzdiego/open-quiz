@@ -2,7 +2,7 @@
 
 Aplicación educativa de cuestionarios en tiempo real, con frontend sencillo y sin cuentas ni base de datos.
 
-**Estado actual: Fases 1–8 terminadas.** El profesor crea una partida desde un XLSX de Nextcloud y controla las preguntas. Los alumnos entran con código y nick, responden en tiempo real y ven sus puntos, clasificación y podio. La interfaz se adapta a móvil y escritorio, con botones grandes, navegación por teclado y estados claros de conexión, envío y guardado. El servidor controla tiempo y puntuación; profesor y alumnos recuperan el estado actual al reconectar. Cada pregunta cerrada se guarda en el mismo XLSX como `P01`, `P02`, etc., con bloqueo de escritura y reintento manual ante errores.
+**Estado actual: Fases 1–10 implementadas.** El profesor crea una partida desde un XLSX de Nextcloud y controla las preguntas. Los alumnos entran con código y nick, responden en tiempo real y ven sus puntos, clasificación y podio. La interfaz se adapta a móvil y escritorio, con botones grandes, navegación por teclado y estados claros de conexión, envío y guardado. El servidor controla tiempo y puntuación; profesor y alumnos recuperan el estado actual al reconectar. Cada pregunta cerrada se guarda en el mismo XLSX como `P01`, `P02`, etc., con bloqueo de escritura y reintento manual ante errores. La Fase 9 añade la imagen Docker, health check y pruebas de Socket.IO detrás de un proxy HTTPS; la construcción y ejecución real del contenedor deben comprobarse en un equipo con Docker siguiendo la guía de despliegue. La Fase 10 añade límites de recursos y abuso, cabeceras de seguridad, liberación de conexiones de partidas caducadas y guardado condicional por ETag. La demostración con Nextcloud real, móviles y Docker sigue siendo una comprobación manual de despliegue.
 
 ## Requisitos e instalación
 
@@ -42,18 +42,22 @@ El frontend sigue sirviéndose desde `public/`. Para detener el servidor utiliza
 
 ## Variables de entorno
 
-| Variable                            | Valor predeterminado | Uso actual                                             |
-| ----------------------------------- | -------------------- | ------------------------------------------------------ |
-| `PORT`                              | `3000`               | Puerto HTTP, entero entre 1 y 65535                    |
-| `NODE_ENV`                          | `development`        | `development`, `test` o `production`                   |
-| `NEXTCLOUD_WEBDAV_URL`              | Sin configurar       | Raíz WebDAV de la cuenta de Nextcloud                  |
-| `NEXTCLOUD_USERNAME`                | Sin configurar       | Usuario de Nextcloud; solo backend                     |
-| `NEXTCLOUD_APP_PASSWORD`            | Sin configurar       | Contraseña de aplicación; solo backend                 |
-| `NEXTCLOUD_REQUEST_TIMEOUT_MS`      | `15000`              | Tiempo máximo por descarga/subida, entre 1 y 300000 ms |
-| `DEFAULT_QUESTION_DURATION_SECONDS` | `20`                 | Duración por pregunta, entero entre 1 y 3600 segundos  |
-| `MAX_POINTS_PER_QUESTION`           | `1000`               | Máximo por pregunta, entero entre 1 y 1000000          |
-| `SESSION_TTL_MINUTES`               | `120`                | Minutos sin actividad antes de eliminar una sesión     |
-| `FINISHED_SESSION_TTL_MINUTES`      | `30`                 | Minutos desde la finalización para eliminar una sesión |
+| Variable                            | Valor predeterminado | Uso actual                                                    |
+| ----------------------------------- | -------------------- | ------------------------------------------------------------- |
+| `PORT`                              | `3000`               | Puerto HTTP, entero entre 1 y 65535                           |
+| `PUBLIC_ORIGIN`                     | Sin configurar       | Origen público HTTP/HTTPS exacto, sin barra final             |
+| `MAX_ACTIVE_SESSIONS`               | `50`                 | Límite de sesiones en memoria, entre 1 y 1000                 |
+| `MAX_PARTICIPANTS_PER_SESSION`      | `100`                | Participantes por sala, entre 1 y 1000; incluye desconectados |
+| `MAX_CONNECTIONS`                   | `1000`               | Conexiones Socket.IO simultáneas, entre 1 y 10000             |
+| `NODE_ENV`                          | `development`        | `development`, `test` o `production`                          |
+| `NEXTCLOUD_WEBDAV_URL`              | Sin configurar       | Raíz WebDAV de la cuenta de Nextcloud                         |
+| `NEXTCLOUD_USERNAME`                | Sin configurar       | Usuario de Nextcloud; solo backend                            |
+| `NEXTCLOUD_APP_PASSWORD`            | Sin configurar       | Contraseña de aplicación; solo backend                        |
+| `NEXTCLOUD_REQUEST_TIMEOUT_MS`      | `15000`              | Tiempo máximo por descarga/subida, entre 1 y 300000 ms        |
+| `DEFAULT_QUESTION_DURATION_SECONDS` | `20`                 | Duración por pregunta, entero entre 1 y 3600 segundos         |
+| `MAX_POINTS_PER_QUESTION`           | `1000`               | Máximo por pregunta, entero entre 1 y 1000000                 |
+| `SESSION_TTL_MINUTES`               | `120`                | Minutos sin actividad antes de eliminar una sesión            |
+| `FINISHED_SESSION_TTL_MINUTES`      | `30`                 | Minutos desde la finalización para eliminar una sesión        |
 
 La duración y los puntos se leen y validan al arrancar, y se aplican a todas las preguntas. Los TTL son enteros positivos y se comprueban cada minuto. La actividad incluye creación, entrada, reconexión, desconexión, respuestas válidas y controles del profesor; mantener una página abierta sin interactuar no renueva el TTL. Los temporizadores de preguntas se cancelan al cerrar una pregunta, eliminar su sesión o detener el servidor.
 
@@ -65,9 +69,9 @@ El modo inicial utiliza usuario y contraseña de aplicación mediante autenticac
 
 Configura `NEXTCLOUD_WEBDAV_URL`, `NEXTCLOUD_USERNAME` y `NEXTCLOUD_APP_PASSWORD` en el `.env` del servidor o en las variables de entorno del hosting. La URL no debe contener usuario/contraseña, parámetros ni fragmentos. HTTP se admite únicamente en `localhost`, `127.0.0.1` y `::1` para pruebas locales. Los enlaces compartidos quedan para una ampliación del adaptador; esta fase implementa un solo modo de conexión.
 
-`WorkbookStorage` define el contrato `downloadWorkbook(reference): Promise<Buffer>` y `uploadWorkbook(reference, data): Promise<void>`. `NextcloudWebDavWorkbookStorage` lo implementa mediante el cliente mantenido [`webdav`](https://github.com/perry-mitchell/webdav-client). La referencia es una ruta literal relativa a la raíz configurada, por ejemplo `Quiz/Matemáticas 1.xlsx`, con barra inicial opcional; no es una URL pública ni una ruta del disco local. Escribe espacios, tildes y otros caracteres tal como aparecen en Nextcloud, sin codificarlos como URL. Solo se admite extensión `.xlsx`, sin distinguir mayúsculas. Se rechazan rutas vacías, segmentos `.` o `..`, barras duplicadas, barras invertidas, dos puntos, caracteres de control y rutas de más de 1024 caracteres.
+`WorkbookStorage` define el contrato `downloadWorkbook(reference): Promise<Buffer>` y `uploadWorkbook(reference, data): Promise<void>`. El contrato permite también `downloadWorkbookSnapshot(reference)` y un tercer argumento `{ expectedVersion }` en la subida. El adaptador real usa estas operaciones para proteger el guardado; los mocks simples pueden conservar el contrato básico. `NextcloudWebDavWorkbookStorage` lo implementa mediante el cliente mantenido [`webdav`](https://github.com/perry-mitchell/webdav-client). La referencia es una ruta literal relativa a la raíz configurada, por ejemplo `Quiz/Matemáticas 1.xlsx`, con barra inicial opcional; no es una URL pública ni una ruta del disco local. Escribe espacios, tildes y otros caracteres tal como aparecen en Nextcloud, sin codificarlos como URL. Solo se admite extensión `.xlsx`, sin distinguir mayúsculas. Se rechazan rutas vacías, segmentos `.` o `..`, barras duplicadas, barras invertidas, dos puntos, caracteres de control y rutas de más de 1024 caracteres.
 
-Cada descarga obtiene el contenido remoto actual y devuelve un `Buffer`; no se usa disco ni una copia persistente. La subida recibe un `Buffer` no vacío y **sustituye el contenido del fichero indicado**, con el tipo MIME de XLSX. El adaptador no crea carpetas ni interpreta las hojas de Excel: la importación corresponde a `importQuestions` y la escritura de pestañas a `writeQuestionResults`, coordinada por `WorkbookResultsService`.
+Cada descarga obtiene el contenido remoto actual por streaming y devuelve un `Buffer`; se cancela al superar 10 MiB o agotar el plazo, incluso sin `Content-Length`. No se usa disco ni una copia persistente. La subida recibe un `Buffer` no vacío y **sustituye el contenido del fichero indicado**, con el tipo MIME de XLSX. El adaptador no crea carpetas ni interpreta las hojas de Excel: la importación corresponde a `importQuestions` y la escritura de pestañas a `writeQuestionResults`, coordinada por `WorkbookResultsService`.
 
 `WorkbookStorageError` proporciona códigos y mensajes comprensibles para autenticación, permisos, fichero inexistente, carpeta inexistente, bloqueo, cuota, timeout y fallos generales de lectura/escritura. No conserva la respuesta ni el error original del cliente WebDAV, que pueden contener información sensible. No hay reintentos automáticos de subida. Para las pruebas de servicios, `tests/helpers/in-memory-workbook-storage.ts` ofrece un mock intercambiable que copia los Buffers y aísla los libros.
 
@@ -115,7 +119,7 @@ QUESTION_RESULTS → FINISHED
 
 Una partida terminada no se reabre. Para terminar desde una pregunta activa, primero debe cerrarse, calcularse sus resultados y guardarlos. `transitionSession` delega en los métodos de juego para mantener esas reglas; no cambia el estado saltándose el cálculo de puntos ni el guardado pendiente. Tras la última pregunta, el profesor pulsa **Finalizar partida**. También puede finalizar desde el lobby o desde resultados aunque queden preguntas, siempre que todas las rondas cerradas estén guardadas.
 
-`cleanupExpired({ sessionTtlMs, finishedSessionTtlMs })` elimina sesiones sin actividad al alcanzar el primer TTL y sesiones terminadas al alcanzar el segundo, medido desde `finishedAt`. Elimina también el índice de código. Ambos límites son enteros positivos en milisegundos. La aplicación lo invoca cada minuto y cancela el temporizador al cerrar el servidor. No elimina una sesión mientras tenga un guardado en curso; cada cambio de estado del guardado renueva su actividad. Una sesión con guardado fallido sigue sujeta al TTL. La sesión conserva la referencia del libro y las preguntas importadas, nunca una copia del XLSX como fuente de verdad para futuras escrituras.
+`cleanupExpired({ sessionTtlMs, finishedSessionTtlMs })` elimina sesiones sin actividad al alcanzar el primer TTL y sesiones terminadas al alcanzar el segundo, medido desde `finishedAt`. Elimina también el índice de código. Ambos límites son enteros positivos en milisegundos. La aplicación lo invoca cada minuto y cancela el temporizador al cerrar el servidor. Al caducar, emite `session:expired`, libera las rooms y la pertenencia de cada socket y permite iniciar otra partida desde el formulario; la conexión sigue disponible. No elimina una sesión mientras tenga un guardado en curso; cada cambio de estado del guardado renueva su actividad. Una sesión con guardado fallido sigue sujeta al TTL. La sesión conserva la referencia del libro y las preguntas importadas, nunca una copia del XLSX como fuente de verdad para futuras escrituras.
 
 `calculatePoints({ isCorrect, elapsedMs, durationMs, maxPoints })` aplica la fórmula lineal, redondea a entero y limita el resultado a `[0, maxPoints]`. El máximo predeterminado es 1000. Una respuesta incorrecta o recibida al alcanzar o superar la duración obtiene cero puntos. Los tiempos negativos se limitan a cero; las duraciones no positivas, los números no finitos y los máximos inválidos generan un error. Los tiempos del dominio se expresan en milisegundos y proceden del reloj del servidor.
 
@@ -163,9 +167,22 @@ Los controles exigen tanto pertenencia al rol profesor en esa sesión como el to
 | `student:result`        | Solo propietario: `{ participantId, nick, answered, isCorrect, elapsedMs, points, totalPoints, position }`.                                                                                                                                                                                                                                                                                                                                                                                             |
 | `ranking:updated`       | Room de la sesión: entradas `{ participantId, nick, totalPoints, position }`.                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `game:ended`            | Room de la sesión: `{ ranking, podium }`; podio con hasta tres entradas.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `session:expired`       | Sin payload, solo a las conexiones de la sesión que caduca. Libera su pertenencia y vuelve al formulario.                                                                                                                                                                                                                                                                                                                                                                                               |
 | `workbook:save-updated` | Solo profesor de esa sesión: `{ questionNumber, worksheetName, status, error }`. `status` es `saving`, `saved` o `error`; `error` es `null` o `{ code, message }`, sin datos del fichero ni credenciales.                                                                                                                                                                                                                                                                                               |
 
-No se habilita CORS para otros orígenes. El handshake rechaza un `Origin` cuyo host no coincida con el servidor, también para WebSocket; los clientes de pruebas sin `Origin` pueden conectar. El límite de payload es 16 KiB. La creación, entrada y reconexión admiten 120 operaciones y cinco intentos de creación por minuto e IP vista por el servidor, compartidos entre sockets. Los controles del juego y las respuestas tienen un límite separado de 120 operaciones por minuto y socket; las respuestas de 40 alumnos bajo la misma IP no consumen un contador común. No se confía en `X-Forwarded-For`; detrás de un proxy varios usuarios pueden compartir los límites de entrada. Los logs incluyen eventos e identificadores internos, sin tokens, credenciales, referencias ni detalles de errores inesperados.
+No se habilita CORS para otros orígenes. Si se configura `PUBLIC_ORIGIN`, el handshake acepta solo ese origen exacto; en otro caso exige que el host coincida con el servidor. Rechaza orígenes con credenciales, ruta o fragmentos, también para WebSocket. Los clientes sin `Origin` pueden conectar: esta comprobación no sustituye a los tokens. El límite de payload es 16 KiB, tanto por polling como por WebSocket.
+
+La creación, entrada y reconexión admiten 600 operaciones por minuto e IP y 120 por socket; crear tiene además un límite de cinco intentos por minuto e IP. Se limita también el tráfico durante operaciones pendientes. Los controles y respuestas permiten 120 operaciones por minuto por identidad de profesor o participante y sesión, conservando el contador al reconectar. Los límites permiten 40 alumnos y varias reconexiones desde una misma IP. No se confía en `X-Forwarded-For`; detrás de un proxy varios usuarios comparten el presupuesto de entrada y creación. Los contadores caducan y su mapa está acotado a 10000 entradas. Los logs incluyen eventos e identificadores internos, sin tokens, credenciales, referencias ni detalles de errores inesperados.
+
+## Endurecimiento del MVP
+
+Las respuestas HTTP, el cliente de Socket.IO y los handshakes llevan CSP, `nosniff`, protección contra marcos y políticas de referencias y permisos. CSP permite scripts y estilos propios y los WebSockets del origen del servicio, sin scripts inline ni `eval`. Los nicks, enunciados y respuestas se insertan mediante `textContent` y nodos DOM; el contenido del XLSX no se interpreta como HTML. Los tokens siguen generándose con 32 bytes criptográficos, se comparan con `timingSafeEqual` y solo se envían a su navegador propietario. No se muestran detalles inesperados de errores ni secretos en logs.
+
+Las capacidades se comprueban antes de descargar y al crear, para cubrir creaciones concurrentes. Como máximo se cargan cuatro libros a la vez. Las sesiones terminadas cuentan para el límite hasta caducar; los alumnos desconectados cuentan para el límite de participantes y pueden recuperar su lugar mediante su token aun con una sala llena. `MAX_CONNECTIONS` limita también las conexiones que aún no han entrado en una partida.
+
+Antes de abrir un libro con ExcelJS se valida el ZIP: máximo 10 MiB comprimidos, 50 MiB descomprimidos y 2000 entradas. Se comprueba la descompresión real con un límite de salida para detectar tamaños declarados falsos. Se rechazan archivos divididos, ZIP64 y entradas cifradas o duplicadas. Estas comprobaciones se aplican al importar y al releer el libro para guardar. Se admiten hasta 500 preguntas, 2000 caracteres por enunciado y 1000 por respuesta. Un rechazo no crea una partida ni sobrescribe el libro. No se han añadido dependencias.
+
+Las pruebas de regresión cubren cabeceras, origen explícito, payloads excesivos, límites compartidos y conservados al reconectar, capacidades, caducidad con sockets conectados, libros excesivos y cambios de versión durante el guardado. Se mantienen las pruebas de flujo completo con tres y 40 alumnos, aislamiento, desconexiones, plazos, ranking, podio y `P01`/`P02`, además del proxy HTTPS. No requieren Nextcloud real. Para verificar el despliegue, realiza las pruebas manuales de esta guía con un libro de prueba y comprueba también el conflicto de edición entre descarga y subida. La revisión visual y XSS en un navegador real requiere una sesión de navegador disponible.
 
 ## Uso por profesor y alumnos
 
@@ -233,7 +250,7 @@ Se conservan las hojas existentes. `P01` corresponde a la primera pregunta, `P02
 
 Un fallo de descarga, lectura XLSX o subida deja la ronda en `QUESTION_RESULTS`, con ranking y filas intactos. El profesor recibe un mensaje y el botón **Reintentar guardado**; no puede avanzar ni finalizar hasta confirmar el guardado. Los reintentos descargan de nuevo el fichero y no recalculan puntos. Si una subida se completó en Nextcloud pero se perdió su confirmación, el reintento detectará `Pxx` existente y requerirá resolver el conflicto explícitamente.
 
-La nueva descarga conserva cambios realizados antes de cada intento. No hay comparación de ETag ni bloqueo de editores externos entre descarga y subida; evita editar el mismo libro durante ese intervalo. Los locks solo existen en esta instancia del servidor. Reiniciar el proceso o dejar expirar la sesión elimina resultados pendientes de su memoria.
+La nueva descarga conserva cambios realizados antes de cada intento. El adaptador Nextcloud descarga junto con un ETag fuerte y envía `If-Match` al subir. Si el libro cambia durante ese intervalo, HTTP 412 devuelve `WORKBOOK_CHANGED`: conserva ranking y resultados y permite reintentar desde una descarga nueva, sin sobrescribir el cambio externo. Si falta un ETag válido, devuelve `VERSION_UNAVAILABLE` y no sube. Los adaptadores que solo implementen el contrato básico no ofrecen esa comprobación de versión. Los locks solo existen en esta instancia del servidor. Reiniciar el proceso o dejar expirar la sesión elimina resultados pendientes de su memoria.
 
 ### Prueba manual del guardado y reintento
 
@@ -269,7 +286,22 @@ El importador no lee archivos locales ni modifica el `Buffer`. Los archivos loca
 
 ## Docker
 
-El Dockerfile y las instrucciones de despliegue están previstos para la Fase 9. Por ahora se ejecuta directamente con Node.js.
+La imagen utiliza Node.js 24, compila TypeScript en una etapa separada y ejecuta únicamente las dependencias de producción y el frontend estático como usuario `node`. El proceso Node recibe directamente las señales de parada. El contexto de construcción excluye `.env`, credenciales, Git, pruebas y dependencias locales.
+
+```sh
+docker build -t open-quiz:local .
+docker run --rm --name open-quiz -p 3000:3000 open-quiz:local
+```
+
+Abre <http://localhost:3000>. Para crear partidas, añade `--env-file .env` al comando `docker run` con las variables de Nextcloud configuradas. La imagen establece `NODE_ENV=production`; si tu `.env` contiene `NODE_ENV=development`, añade también `-e NODE_ENV=production` para mantener el modo de producción.
+
+El health check ejecuta `scripts/healthcheck.mjs` contra `GET /health` en el `PORT` configurado; no requiere curl ni acceso a Nextcloud. La aplicación no necesita volúmenes ni disco persistente. Utiliza **una sola instancia**: las sesiones y los bloqueos viven en memoria y se pierden al reiniciar.
+
+Consulta [la guía de despliegue](docs/deployment.md) para cambiar el puerto, validar la imagen, configurar un proxy HTTPS y desplegar el mismo contenedor en Render, Koyeb o Northflank. Las pruebas locales de TLS, polling, WebSocket, Upgrade y flujo de juego se ejecutan con:
+
+```sh
+npm test -- tests/deployment.test.ts tests/proxy-integration.test.ts
+```
 
 ## Arquitectura actual
 
@@ -290,6 +322,7 @@ src/
   excel/
     import-questions.ts    Lectura y validación XLSX desde Buffer
     excel-import-error.ts  Errores de importación con hoja y celda
+    workbook-limits.ts     Límites y validación del ZIP antes de abrirlo
     write-question-results.ts  Añade Pxx desde un resultado cerrado sin sobrescribir
     excel-results-error.ts     Errores seguros de lectura, conflicto y serialización
   services/
@@ -306,9 +339,12 @@ src/
     payloads.ts       Validación estricta de payloads del lobby y del juego
     lobby-handlers.ts Creación, reconexión, rooms y gestión compartida de errores
     game-handlers.ts  Controles, respuestas, temporizadores y emisión de vistas públicas
-    rate-limiter.ts   Límite de intentos por IP sin dependencias adicionales
+    rate-limiter.ts   Límites por IP, socket e identidad, con memoria acotada
 scripts/
   check-nextcloud.ts Prueba manual de descarga/importación y subida opcional
+  healthcheck.mjs    Comprobación HTTP del contenedor en el PORT configurado
+docs/
+  deployment.md     Docker, proxy HTTPS, hosting y verificación manual
 public/
   index.html        Página inicial
   teacher.html      Formulario de creación y sala del profesor
@@ -322,9 +358,13 @@ public/
   js/ui.js          Avisos de conexión, foco y métricas compartidas
 tests/
   app.test.ts       Pruebas HTTP y conexión en tiempo real
+  deployment.test.ts          Health check como proceso real y errores HTTP/JSON
+  proxy-integration.test.ts   HTTPS, polling, WebSocket, Upgrade y juego detrás de proxy
   lobby-integration.test.ts   Flujo real del lobby con almacenamiento simulado
   game-service.test.ts        Reglas, plazos, puntuación, estados y aislamiento del juego
   game-integration.test.ts    Flujo completo, temporizadores y reconexión por Socket.IO
+  rate-limiter.test.ts        Abuso, presupuestos, reconexión y límites de memoria
+  workbook-limits.test.ts     Tamaños comprimidos/reales y límites de preguntas
   config.test.ts    Pruebas de configuración
   identifiers.test.ts        Formato de códigos y secretos
   session-repository.test.ts Índices, colisiones y eliminación

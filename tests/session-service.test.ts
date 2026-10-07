@@ -504,4 +504,63 @@ describe('Servicio de sesiones', () => {
     }
     expect(repository.size).toBe(1);
   });
+
+  it('acota sesiones y participantes, permite reconectar una sala llena y recupera capacidad tras caducar', () => {
+    service = new SessionService(repository, {
+      now: () => now,
+      maxSessions: 1,
+      maxParticipantsPerSession: 1,
+    });
+    const session = service.createSession(gameWorkbook);
+    const participant = service.joinSession(
+      session.joinCode,
+      'Ana',
+      'socket-1',
+    );
+    expectDomainError(
+      () => service.createSession(gameWorkbook),
+      'SESSION_CAPACITY_REACHED',
+    );
+    expectDomainError(
+      () => service.joinSession(session.joinCode, 'Luis', 'socket-2'),
+      'PARTICIPANT_CAPACITY_REACHED',
+    );
+    service.disconnectParticipant(session.id, participant.id, 'socket-1');
+    expectDomainError(
+      () => service.joinSession(session.joinCode, 'Luis', 'socket-2'),
+      'PARTICIPANT_CAPACITY_REACHED',
+    );
+    expect(
+      service.reconnectParticipant(
+        session.joinCode,
+        participant.id,
+        participant.reconnectToken,
+        'socket-3',
+      ).id,
+    ).toBe(participant.id);
+    const expired = vi.fn();
+    now += 1000;
+    expect(
+      service.cleanupExpired({
+        sessionTtlMs: 1000,
+        finishedSessionTtlMs: 100,
+        onExpired: expired,
+      }),
+    ).toBe(1);
+    expect(expired).toHaveBeenCalledExactlyOnceWith(session.id);
+    expect(service.createSession(gameWorkbook).state).toBe('LOBBY');
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity, 1001])(
+    'rechaza capacidades de dominio inválidas %j',
+    (value) => {
+      expect(
+        () => new SessionService(repository, { maxSessions: value }),
+      ).toThrow(RangeError);
+      expect(
+        () =>
+          new SessionService(repository, { maxParticipantsPerSession: value }),
+      ).toThrow(RangeError);
+    },
+  );
 });

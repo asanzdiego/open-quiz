@@ -58,6 +58,7 @@ export function registerLobbyHandlers(
   }: LobbyHandlerOptions,
 ) {
   const limiter = new LobbyRateLimiter();
+  let pendingCreates = 0;
   const game = createGameHandlers(io, sessions, logger, storage);
   const publishLobby = (sessionId: string) => {
     io.to(room(sessionId)).emit(
@@ -72,6 +73,23 @@ export function registerLobbyHandlers(
       action: () => void | Promise<void>,
       unjoined = true,
     ): Promise<void> {
+      // Contar también mensajes enviados mientras hay una descarga pendiente.
+      try {
+        const membership = socket.data.membership;
+        if (unjoined || !membership)
+          limiter.check(
+            socket.handshake.address,
+            operation === 'teacher:create-session',
+            socket.id,
+          );
+        else
+          limiter.checkGameplay(
+            `${membership.sessionId}:${membership.role === 'student' ? membership.participantId : 'teacher'}`,
+          );
+      } catch (error) {
+        socket.emit('app:error', publicError(error, operation));
+        return;
+      }
       if (socket.data.busy) {
         socket.emit('app:error', {
           operation,
@@ -82,12 +100,6 @@ export function registerLobbyHandlers(
       }
       socket.data.busy = true;
       try {
-        if (unjoined)
-          limiter.check(
-            socket.handshake.address,
-            operation === 'teacher:create-session',
-          );
-        else limiter.checkGameplay(socket.id);
         if (unjoined && socket.data.membership) {
           throw new LobbyRequestError(
             'ALREADY_JOINED',
@@ -111,7 +123,19 @@ export function registerLobbyHandlers(
     socket.on('teacher:create-session', (payload) => {
       void run('teacher:create-session', async () => {
         const { workbookReference } = parseCreateSession(payload);
-        const workbook = await loadSessionWorkbook(storage, workbookReference);
+        sessions.assertCanCreateSession();
+        if (pendingCreates >= 4)
+          throw new LobbyRequestError(
+            'SERVER_BUSY',
+            'El servidor está cargando otros cuestionarios. Inténtalo de nuevo en unos segundos.',
+          );
+        pendingCreates += 1;
+        let workbook;
+        try {
+          workbook = await loadSessionWorkbook(storage, workbookReference);
+        } finally {
+          pendingCreates -= 1;
+        }
         // Evitar partidas huérfanas si el profesor cierra la página durante la descarga.
         if (!socket.connected) return;
         const session = sessions.createSession(workbook);
@@ -240,5 +264,24 @@ export function registerLobbyHandlers(
       }
     });
   });
-  return game;
+  return {
+    ...game,
+    expireSession(sessionId: string) {
+      // Liberar la pertenencia permite volver al formulario sin recargar ni reconectar.
+      for (const socketId of io.sockets.adapter.rooms.get(room(sessionId)) ??
+        []) {
+        const socket = io.sockets.sockets.get(socketId);
+        if (!socket) continue;
+        delete socket.data.membership;
+        void socket.leave(room(sessionId));
+        void socket.leave(teacherRoom(sessionId));
+        socket.emit('session:expired');
+      }
+      logger({ event: 'session_expired', sessionId });
+    },
+    pruneTimers() {
+      game.pruneTimers();
+      limiter.prune();
+    },
+  };
 }

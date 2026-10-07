@@ -18,12 +18,14 @@ interface ObservedRequest {
   authorization: string | undefined;
   contentType: string | undefined;
   contentLength: string | undefined;
+  expectedVersion: string | undefined;
 }
 
 describe('Cliente WebDAV real contra un servidor HTTP local', () => {
   let config: NextcloudConfig;
   let fixture: Buffer;
   let stored: Buffer;
+  let version: number;
   const requests: ObservedRequest[] = [];
   const server = createServer(async (request, response) => {
     requests.push({
@@ -32,6 +34,7 @@ describe('Cliente WebDAV real contra un servidor HTTP local', () => {
       authorization: request.headers.authorization,
       contentType: request.headers['content-type'],
       contentLength: request.headers['content-length'],
+      expectedVersion: request.headers['if-match'],
     });
 
     if (request.url?.endsWith('/timeout-headers.xlsx')) return;
@@ -49,6 +52,11 @@ describe('Cliente WebDAV real contra un servidor HTTP local', () => {
       response.writeHead(403).end();
       return;
     }
+    if (request.url?.endsWith('/large.xlsx')) {
+      response.writeHead(200);
+      response.end(Buffer.alloc(10 * 1024 * 1024 + 1));
+      return;
+    }
     if (decodeURIComponent(request.url ?? '') !== `${root}/${reference}`) {
       response.writeHead(404).end();
       return;
@@ -58,13 +66,22 @@ describe('Cliente WebDAV real contra un servidor HTTP local', () => {
       response.writeHead(200, {
         'Content-Type':
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ETag: `"v${version}"`,
       });
       response.end(stored);
     } else if (request.method === 'PUT') {
+      if (
+        request.headers['if-match'] &&
+        request.headers['if-match'] !== `"v${version}"`
+      ) {
+        response.writeHead(412).end();
+        return;
+      }
       try {
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(Buffer.from(chunk));
         stored = Buffer.concat(chunks);
+        version += 1;
         response.writeHead(204).end();
       } catch {
         response.destroy();
@@ -96,6 +113,7 @@ describe('Cliente WebDAV real contra un servidor HTTP local', () => {
 
   beforeEach(() => {
     stored = Buffer.from(fixture);
+    version = 1;
     requests.length = 0;
   });
 
@@ -148,6 +166,37 @@ describe('Cliente WebDAV real contra un servidor HTTP local', () => {
     await expect(
       storage.uploadWorkbook('read-only.xlsx', fixture),
     ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+  });
+
+  it('rechaza una versión antigua con HTTP 412 y permite descargar y reintentar sin perder cambios', async () => {
+    const storage = new NextcloudWebDavWorkbookStorage(config);
+    const previous = await storage.downloadWorkbookSnapshot(reference);
+    expect(previous.version).toBe('"v1"');
+    stored = Buffer.from('Cambio externo');
+    version += 1;
+    await expect(
+      storage.uploadWorkbook(reference, previous.data, {
+        expectedVersion: previous.version,
+      }),
+    ).rejects.toMatchObject({ code: 'WORKBOOK_CHANGED' });
+    expect(stored.toString()).toBe('Cambio externo');
+    const current = await storage.downloadWorkbookSnapshot(reference);
+    await storage.uploadWorkbook(reference, current.data, {
+      expectedVersion: current.version,
+    });
+    expect(stored.toString()).toBe('Cambio externo');
+    expect(
+      requests
+        .filter((request) => request.method === 'PUT')
+        .map((request) => request.expectedVersion),
+    ).toEqual(['"v1"', '"v2"']);
+  });
+
+  it('cancela una descarga HTTP real que excede el límite', async () => {
+    const storage = new NextcloudWebDavWorkbookStorage(config);
+    await expect(storage.downloadWorkbook('large.xlsx')).rejects.toMatchObject({
+      code: 'WORKBOOK_TOO_LARGE',
+    });
   });
 
   it.each(['timeout-headers.xlsx', 'timeout-body.xlsx'])(

@@ -1,6 +1,8 @@
 import ExcelJS from 'exceljs';
 import type { RoundResult } from '../domain/question/round.ts';
 import { ExcelResultsError } from './excel-results-error.ts';
+import { ExcelImportError } from './excel-import-error.ts';
+import { validateWorkbookArchive } from './workbook-limits.ts';
 
 export const RESULT_HEADERS = [
   'Nick',
@@ -20,8 +22,14 @@ export async function writeQuestionResults(
   const name = `P${String(result.questionNumber).padStart(2, '0')}`;
   const workbook = new ExcelJS.Workbook();
   try {
+    validateWorkbookArchive(data);
     await workbook.xlsx.load(Uint8Array.from(data).buffer);
-  } catch {
+  } catch (error) {
+    if (
+      error instanceof ExcelImportError &&
+      error.code === 'WORKBOOK_TOO_LARGE'
+    )
+      throw new ExcelResultsError(error.code, error.message);
     throw new ExcelResultsError(
       'INVALID_WORKBOOK',
       'No se han podido guardar los resultados: el fichero no es un libro XLSX válido.',

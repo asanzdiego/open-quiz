@@ -80,6 +80,25 @@ export function createLobbyConnection(role, onReady) {
         'El navegador no permite guardar la reconexión. Conserva esta página abierta.';
     }
   }
+  function resetSession(message) {
+    persist(null);
+    setPending(false);
+    form.hidden = false;
+    lobby.hidden = true;
+    document.getElementById('game').hidden = true;
+    document.getElementById('page-title').textContent =
+      role === 'teacher' ? 'Crear partida' : 'Entrar a la partida';
+    document.title = `${role === 'teacher' ? 'Crear partida' : 'Entrar como alumno'} · Open Quiz`;
+    error.textContent = message;
+    error.hidden = false;
+    retry.hidden = true;
+    setConnectionStatus(
+      status,
+      'connected',
+      'Conectado al servidor. Puedes entrar a una nueva partida.',
+    );
+    focusHeading(error);
+  }
   function restore() {
     if (!saved || !socket.connected || pending) return;
     clearError();
@@ -177,18 +196,7 @@ export function createLobbyConnection(role, onReady) {
         'INVALID_PAYLOAD',
       ].includes(payload.code);
       if (expired) {
-        persist(null);
-        form.hidden = false;
-        lobby.hidden = true;
-        document.getElementById('game').hidden = true;
-        document.getElementById('page-title').textContent =
-          role === 'teacher' ? 'Crear partida' : 'Entrar a la partida';
-        document.title = `${role === 'teacher' ? 'Crear partida' : 'Entrar como alumno'} · Open Quiz`;
-        setConnectionStatus(
-          status,
-          'connected',
-          'Conectado al servidor. Puedes entrar a una nueva partida.',
-        );
+        resetSession(payload.message);
       } else {
         retry.hidden = false;
       }
@@ -200,6 +208,11 @@ export function createLobbyConnection(role, onReady) {
     : ['student:joined', 'student:restored'])
     socket.on(event, ready);
   socket.on('lobby:updated', renderLobby);
+  socket.on('session:expired', () => {
+    resetSession(
+      'La partida ha caducado. Puedes crear o entrar a otra partida.',
+    );
+  });
   retry.addEventListener('click', () => {
     if (socket.connected) restore();
     else socket.connect();

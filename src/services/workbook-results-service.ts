@@ -78,9 +78,16 @@ export class WorkbookResultsService {
         try {
           if (!reference || !this.#storage)
             throw new WorkbookStorageError('STORAGE_NOT_CONFIGURED');
-          const data = await this.#storage.downloadWorkbook(reference);
+          const snapshot =
+            await this.#storage.downloadWorkbookSnapshot?.(reference);
+          const data =
+            snapshot?.data ?? (await this.#storage.downloadWorkbook(reference));
           const updated = await writeQuestionResults(data, result);
-          await this.#storage.uploadWorkbook(reference, updated);
+          await this.#storage.uploadWorkbook(
+            reference,
+            updated,
+            snapshot ? { expectedVersion: snapshot.version } : undefined,
+          );
           return update({ status: 'saved', error: null });
         } catch (error) {
           return update({ status: 'error', error: safeSaveError(error) });

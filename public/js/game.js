@@ -463,22 +463,29 @@ export function createGameView(role, socket, getCredentials) {
         'INVALID_PAYLOAD',
       ].includes(payload.code)
     ) {
-      clearInterval(countdown);
-      state = 'LOBBY';
-      question = null;
-      result = null;
-      ownResult = null;
-      ranking = [];
-      hasAnswered = false;
-      selectedOptionId = null;
-      synced = false;
-      renderedState = null;
-      renderedQuestionId = null;
-      document.body.dataset.gameState = 'ENTRY';
+      resetGame();
     }
     if (!hasAnswered) selectedOptionId = null;
     updateButtons();
   });
+  function resetGame() {
+    clearInterval(countdown);
+    finishPending();
+    state = 'LOBBY';
+    question = null;
+    result = null;
+    ownResult = null;
+    ranking = [];
+    participantId = null;
+    workbookSave = null;
+    hasAnswered = false;
+    selectedOptionId = null;
+    synced = false;
+    renderedState = null;
+    renderedQuestionId = null;
+    document.body.dataset.gameState = 'ENTRY';
+  }
+  socket.on('session:expired', resetGame);
   for (const event of ['connect', 'disconnect'])
     socket.on(event, () => {
       synced = false;

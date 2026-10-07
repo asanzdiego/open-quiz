@@ -5,6 +5,12 @@ const messages = {
     'Indica una ruta de fichero .xlsx válida dentro de Nextcloud.',
   INVALID_DATA: 'El contenido del fichero debe ser un Buffer no vacío.',
   INVALID_RESPONSE: 'Nextcloud no ha devuelto un fichero binario válido.',
+  WORKBOOK_TOO_LARGE:
+    'El libro supera el límite de 10 MiB. Utiliza un XLSX más pequeño.',
+  VERSION_UNAVAILABLE:
+    'Nextcloud no ha proporcionado una versión válida del libro. No se puede guardar de forma segura.',
+  WORKBOOK_CHANGED:
+    'El libro ha cambiado en Nextcloud durante el guardado. Reintenta para descargar la versión actual.',
   AUTHENTICATION_FAILED:
     'No se ha podido autenticar el acceso a Nextcloud. Revisa el usuario y la contraseña de aplicación en el servidor.',
   PERMISSION_DENIED:

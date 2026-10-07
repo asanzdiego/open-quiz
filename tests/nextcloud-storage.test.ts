@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { inspect } from 'node:util';
+import { Readable } from 'node:stream';
+import { MAX_WORKBOOK_BYTES } from '../src/excel/workbook-limits.ts';
 import type { WebDAVClient } from 'webdav';
 import { describe, expect, it, vi } from 'vitest';
 import type { NextcloudConfig } from '../src/config/nextcloud.ts';
@@ -15,11 +17,39 @@ const config: NextcloudConfig = {
   requestTimeoutMs: 15000,
 };
 
+function streamFor(
+  contents: Buffer | Uint8Array | ArrayBuffer,
+  options: Parameters<WebDAVClient['createReadStream']>[1],
+  etag = '"version-1"',
+) {
+  const data = Buffer.from(
+    contents instanceof ArrayBuffer ? new Uint8Array(contents) : contents,
+  );
+  const headers = new Headers({ etag });
+  setTimeout(
+    () =>
+      options?.callback?.({
+        headers,
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        url: 'https://cloud.example.com',
+        arrayBuffer: async () => Uint8Array.from(data).buffer,
+        json: async () => ({}),
+        text: async () => data.toString(),
+      }),
+    0,
+  );
+  return Readable.from([data]);
+}
+
 function setup() {
   const client = {
-    getFileContents: vi
-      .fn<WebDAVClient['getFileContents']>()
-      .mockResolvedValue(Buffer.from('libro')),
+    createReadStream: vi
+      .fn<WebDAVClient['createReadStream']>()
+      .mockImplementation((_path, options) =>
+        streamFor(Buffer.from('libro'), options),
+      ),
     putFileContents: vi
       .fn<WebDAVClient['putFileContents']>()
       .mockResolvedValue(true),
@@ -39,7 +69,9 @@ describe('NextcloudWebDavWorkbookStorage con cliente simulado', () => {
     'descarga datos binarios como Buffer sin compartir memoria con el cliente (%#)',
     async (contents) => {
       const { storage, client } = setup();
-      client.getFileContents.mockResolvedValue(contents);
+      client.createReadStream.mockImplementation((_path, options) =>
+        streamFor(contents, options),
+      );
       const data = await storage.downloadWorkbook('Quiz/Matemáticas 1.xlsx');
       expect(Buffer.isBuffer(data)).toBe(true);
       expect(data).toEqual(
@@ -53,10 +85,10 @@ describe('NextcloudWebDavWorkbookStorage con cliente simulado', () => {
           contents instanceof ArrayBuffer ? new Uint8Array(contents) : contents,
         ),
       );
-      expect(client.getFileContents).toHaveBeenCalledExactlyOnceWith(
+      expect(client.createReadStream).toHaveBeenCalledExactlyOnceWith(
         '/Quiz/Matemáticas 1.xlsx',
         {
-          format: 'binary',
+          callback: expect.any(Function),
           signal: expect.any(AbortSignal),
         },
       );
@@ -82,7 +114,7 @@ describe('NextcloudWebDavWorkbookStorage con cliente simulado', () => {
         signal: expect.any(AbortSignal),
       },
     );
-    expect(client.getFileContents).not.toHaveBeenCalled();
+    expect(client.createReadStream).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -113,7 +145,7 @@ describe('NextcloudWebDavWorkbookStorage con cliente simulado', () => {
       await expect(
         storage.uploadWorkbook(reference, Buffer.from('libro')),
       ).rejects.toMatchObject({ code: 'INVALID_REFERENCE' });
-      expect(client.getFileContents).not.toHaveBeenCalled();
+      expect(client.createReadStream).not.toHaveBeenCalled();
       expect(client.putFileContents).not.toHaveBeenCalled();
     },
   );
@@ -125,23 +157,80 @@ describe('NextcloudWebDavWorkbookStorage con cliente simulado', () => {
   ])('admite rutas literales %j', async (reference, expected) => {
     const { storage, client } = setup();
     await storage.downloadWorkbook(reference);
-    expect(client.getFileContents).toHaveBeenCalledWith(
+    expect(client.createReadStream).toHaveBeenCalledWith(
       expected,
       expect.any(Object),
     );
   });
 
-  it.each([
-    'texto',
-    Buffer.alloc(0),
-    { data: Buffer.from('libro'), status: 200, statusText: 'OK', headers: {} },
-  ])('rechaza respuestas de formato inesperado (%#)', async (contents) => {
+  it('rechaza una descarga vacía', async () => {
     const { storage, client } = setup();
-    client.getFileContents.mockResolvedValue(contents);
+    client.createReadStream.mockImplementation((_path, options) =>
+      streamFor(Buffer.alloc(0), options),
+    );
     await expect(storage.downloadWorkbook('libro.xlsx')).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
   });
+
+  it('interrumpe una descarga al superar el límite incluso sin Content-Length', async () => {
+    const { storage, client } = setup();
+    const stream = Readable.from([
+      Buffer.alloc(MAX_WORKBOOK_BYTES),
+      Buffer.alloc(1),
+    ]);
+    client.createReadStream.mockReturnValue(stream);
+    await expect(storage.downloadWorkbook('libro.xlsx')).rejects.toMatchObject({
+      code: 'WORKBOOK_TOO_LARGE',
+    });
+    expect(stream.destroyed).toBe(true);
+    await expect(
+      storage.uploadWorkbook(
+        'libro.xlsx',
+        Buffer.alloc(MAX_WORKBOOK_BYTES + 1),
+      ),
+    ).rejects.toMatchObject({ code: 'WORKBOOK_TOO_LARGE' });
+    expect(client.putFileContents).not.toHaveBeenCalled();
+  });
+
+  it('usa la versión descargada como condición al subir', async () => {
+    const { storage, client } = setup();
+    const snapshot = await storage.downloadWorkbookSnapshot('libro.xlsx');
+    expect(snapshot.version).toBe('"version-1"');
+    await storage.uploadWorkbook('libro.xlsx', snapshot.data, {
+      expectedVersion: snapshot.version,
+    });
+    expect(client.putFileContents).toHaveBeenCalledWith(
+      '/libro.xlsx',
+      snapshot.data,
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'If-Match': '"version-1"' }),
+      }),
+    );
+  });
+
+  it.each(['', '*', 'W/"weak"', '"bad\r\nheader"'])(
+    'rechaza versiones inseguras %j antes de subir',
+    async (etag) => {
+      const { storage, client } = setup();
+      client.createReadStream.mockImplementation((_path, options) =>
+        streamFor(
+          Buffer.from('libro'),
+          options,
+          etag.includes('\r') ? '' : etag,
+        ),
+      );
+      await expect(
+        storage.downloadWorkbookSnapshot('libro.xlsx'),
+      ).rejects.toMatchObject({ code: 'VERSION_UNAVAILABLE' });
+      await expect(
+        storage.uploadWorkbook('libro.xlsx', Buffer.from('libro'), {
+          expectedVersion: etag,
+        }),
+      ).rejects.toMatchObject({ code: 'VERSION_UNAVAILABLE' });
+      expect(client.putFileContents).not.toHaveBeenCalled();
+    },
+  );
 
   it('rechaza un Buffer vacío antes de subirlo y detecta una subida no confirmada', async () => {
     const { storage, client } = setup();
@@ -160,6 +249,7 @@ describe('NextcloudWebDavWorkbookStorage con cliente simulado', () => {
     [403, 'PERMISSION_DENIED'],
     [404, 'WORKBOOK_NOT_FOUND'],
     [409, 'CONFLICT'],
+    [412, 'WORKBOOK_CHANGED'],
     [423, 'WORKBOOK_LOCKED'],
     [507, 'QUOTA_EXCEEDED'],
     [408, 'REQUEST_TIMEOUT'],
@@ -174,7 +264,9 @@ describe('NextcloudWebDavWorkbookStorage con cliente simulado', () => {
         ),
         { status },
       );
-      client.getFileContents.mockRejectedValue(error);
+      client.createReadStream.mockImplementation(() => {
+        throw error;
+      });
       client.putFileContents.mockRejectedValue(error);
       for (const operation of [
         () => storage.downloadWorkbook('libro.xlsx'),
@@ -193,9 +285,9 @@ describe('NextcloudWebDavWorkbookStorage con cliente simulado', () => {
 
   it('oculta errores de red y fallos remotos sin registrar detalles ni credenciales', async () => {
     const { storage, client } = setup();
-    client.getFileContents.mockRejectedValue(
-      new Error('ENOTFOUND https://usuario:secreto@host'),
-    );
+    client.createReadStream.mockImplementation(() => {
+      throw new Error('ENOTFOUND https://usuario:secreto@host');
+    });
     client.putFileContents.mockRejectedValue({
       status: 500,
       response: { password: 'secreto' },

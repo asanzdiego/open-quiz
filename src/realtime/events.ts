@@ -85,6 +85,7 @@ export interface ServerToClientEvents {
   'game:ended': (payload: GameEnded) => void;
   'workbook:save-updated': (payload: WorkbookSaveSnapshot) => void;
   'app:error': (payload: AppError) => void;
+  'session:expired': () => void;
 }
 export type Membership =
   | { role: 'teacher'; sessionId: string }

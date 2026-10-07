@@ -1,5 +1,8 @@
 export type ExcelResultsErrorCode =
-  'INVALID_WORKBOOK' | 'RESULT_SHEET_EXISTS' | 'RESULT_SERIALIZATION_FAILED';
+  | 'INVALID_WORKBOOK'
+  | 'WORKBOOK_TOO_LARGE'
+  | 'RESULT_SHEET_EXISTS'
+  | 'RESULT_SERIALIZATION_FAILED';
 
 export class ExcelResultsError extends Error {
   readonly code: ExcelResultsErrorCode;

@@ -48,7 +48,9 @@ describe('Health check del contenedor', () => {
       response.writeHead(status, { 'Content-Type': 'application/json' });
       response.end(body);
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
     try {
       await expect(
         run(process.execPath, [healthcheck], {

@@ -8,6 +8,10 @@ export interface AppConfig {
   finishedSessionTtlMs: number;
   questionDurationMs: number;
   maxPointsPerQuestion: number;
+  maxSessions: number;
+  maxParticipantsPerSession: number;
+  publicOrigin: string | undefined;
+  maxConnections: number;
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -37,6 +41,25 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port,
     nodeEnv,
     nextcloud: readNextcloudConfig(env),
+    publicOrigin: readPublicOrigin(env.PUBLIC_ORIGIN),
+    maxConnections: readInteger(
+      env.MAX_CONNECTIONS ?? '1000',
+      'MAX_CONNECTIONS',
+      1,
+      10_000,
+    ),
+    maxSessions: readInteger(
+      env.MAX_ACTIVE_SESSIONS ?? '50',
+      'MAX_ACTIVE_SESSIONS',
+      1,
+      1000,
+    ),
+    maxParticipantsPerSession: readInteger(
+      env.MAX_PARTICIPANTS_PER_SESSION ?? '100',
+      'MAX_PARTICIPANTS_PER_SESSION',
+      1,
+      1000,
+    ),
     questionDurationMs:
       readInteger(
         env.DEFAULT_QUESTION_DURATION_SECONDS ?? '20',
@@ -88,4 +111,18 @@ function readTtl(raw: string, name: string): number {
     throw new Error(`${name} debe ser un entero positivo de minutos.`);
   }
   return milliseconds;
+}
+
+function readPublicOrigin(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  try {
+    const url = new URL(raw);
+    if (raw === url.origin && ['http:', 'https:'].includes(url.protocol))
+      return raw;
+  } catch {
+    /* El error de configuración no incluye valores. */
+  }
+  throw new Error(
+    'PUBLIC_ORIGIN debe ser un origen HTTP/HTTPS sin ruta, credenciales, parámetros ni fragmentos.',
+  );
 }

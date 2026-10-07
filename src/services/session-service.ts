@@ -31,11 +31,14 @@ interface SessionServiceOptions {
   joinCodeGenerator?: () => string;
   questionDurationMs?: number;
   maxPointsPerQuestion?: number;
+  maxSessions?: number;
+  maxParticipantsPerSession?: number;
 }
 
 interface SessionCleanupOptions {
   sessionTtlMs: number;
   finishedSessionTtlMs: number;
+  onExpired?: (sessionId: string) => void;
 }
 
 export class SessionService {
@@ -44,6 +47,8 @@ export class SessionService {
   readonly #joinCodeGenerator: () => string;
   readonly #questionDurationMs: number;
   readonly #maxPointsPerQuestion: number;
+  readonly #maxSessions: number;
+  readonly #maxParticipantsPerSession: number;
 
   constructor(
     repository = new InMemorySessionRepository(),
@@ -54,6 +59,11 @@ export class SessionService {
     this.#joinCodeGenerator = options.joinCodeGenerator ?? generateJoinCode;
     this.#questionDurationMs = options.questionDurationMs ?? 20_000;
     this.#maxPointsPerQuestion = options.maxPointsPerQuestion ?? 1000;
+    this.#maxSessions = options.maxSessions ?? 50;
+    this.#maxParticipantsPerSession = options.maxParticipantsPerSession ?? 100;
+    for (const limit of [this.#maxSessions, this.#maxParticipantsPerSession])
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000)
+        throw new RangeError('La capacidad debe ser un entero entre 1 y 1000.');
     if (
       !Number.isSafeInteger(this.#questionDurationMs) ||
       this.#questionDurationMs < 1 ||
@@ -70,7 +80,16 @@ export class SessionService {
       throw new RangeError('El máximo debe estar entre 0 y 1000000 puntos.');
   }
 
+  assertCanCreateSession(): void {
+    if (this.#repository.size >= this.#maxSessions)
+      throw new DomainError(
+        'SESSION_CAPACITY_REACHED',
+        'El servidor ha alcanzado el límite de partidas. Espera a que se libere una sala.',
+      );
+  }
+
   createSession(workbook?: SessionWorkbook): Session {
+    this.assertCanCreateSession();
     let joinCode: string | undefined;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const candidate = this.#joinCodeGenerator();
@@ -378,6 +397,11 @@ export class SessionService {
         );
       }
     }
+    if (session.participants.size >= this.#maxParticipantsPerSession)
+      throw new DomainError(
+        'PARTICIPANT_CAPACITY_REACHED',
+        'La partida ha alcanzado el límite de participantes.',
+      );
     this.#validateSocketId(socketId);
 
     const participant: Participant = {
@@ -434,6 +458,7 @@ export class SessionService {
   cleanupExpired({
     sessionTtlMs,
     finishedSessionTtlMs,
+    onExpired,
   }: SessionCleanupOptions): number {
     for (const ttl of [sessionTtlMs, finishedSessionTtlMs]) {
       if (!Number.isSafeInteger(ttl) || ttl <= 0) {
@@ -458,7 +483,10 @@ export class SessionService {
           ? now - (session.finishedAt ?? session.lastActivityAt) >=
             finishedSessionTtlMs
           : now - session.lastActivityAt >= sessionTtlMs;
-      if (expired && this.#repository.delete(session.id)) deleted += 1;
+      if (expired && this.#repository.delete(session.id)) {
+        deleted += 1;
+        onExpired?.(session.id);
+      }
     }
     return deleted;
   }

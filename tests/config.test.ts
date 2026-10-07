@@ -7,6 +7,10 @@ describe('Configuración', () => {
       port: 3000,
       nodeEnv: 'development',
       nextcloud: undefined,
+      publicOrigin: undefined,
+      maxConnections: 1000,
+      maxSessions: 50,
+      maxParticipantsPerSession: 100,
       questionDurationMs: 20_000,
       maxPointsPerQuestion: 1000,
       sessionTtlMs: 120 * 60_000,
@@ -19,6 +23,10 @@ describe('Configuración', () => {
       port: 8080,
       nodeEnv: 'production',
       nextcloud: undefined,
+      publicOrigin: undefined,
+      maxConnections: 1000,
+      maxSessions: 50,
+      maxParticipantsPerSession: 100,
       questionDurationMs: 20_000,
       maxPointsPerQuestion: 1000,
       sessionTtlMs: 120 * 60_000,
@@ -86,4 +94,52 @@ describe('Configuración', () => {
       );
     },
   );
+  it('lee capacidades y un origen explícito', () => {
+    expect(
+      readConfig({
+        MAX_ACTIVE_SESSIONS: '3',
+        MAX_PARTICIPANTS_PER_SESSION: '40',
+        PUBLIC_ORIGIN: 'https://quiz.example.com',
+      }),
+    ).toMatchObject({
+      maxSessions: 3,
+      maxParticipantsPerSession: 40,
+      publicOrigin: 'https://quiz.example.com',
+    });
+  });
+
+  it.each(['0', '-1', '1.5', '10001', 'abc'])(
+    'rechaza el límite de conexiones inválido %j',
+    (value) => {
+      expect(() => readConfig({ MAX_CONNECTIONS: value })).toThrow(
+        'MAX_CONNECTIONS',
+      );
+    },
+  );
+  it.each(['0', '-1', '1.5', '1001', 'abc'])(
+    'rechaza capacidades inválidas %j',
+    (value) => {
+      for (const name of [
+        'MAX_ACTIVE_SESSIONS',
+        'MAX_PARTICIPANTS_PER_SESSION',
+      ])
+        expect(() => readConfig({ [name]: value })).toThrow(name);
+    },
+  );
+  it.each([
+    '',
+    '*',
+    'https://quiz.example.com/',
+    'https://user:secret@quiz.example.com',
+    'https://quiz.example.com?secret=1',
+    'file:///tmp',
+    'https://quiz.example.com/path',
+  ])('rechaza orígenes inválidos sin mostrar su valor %j', (value) => {
+    expect(() => readConfig({ PUBLIC_ORIGIN: value })).toThrow('PUBLIC_ORIGIN');
+    try {
+      readConfig({ PUBLIC_ORIGIN: value });
+    } catch (error) {
+      expect(String(error)).not.toContain('secret');
+    }
+  });
 });

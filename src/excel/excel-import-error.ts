@@ -1,5 +1,7 @@
 export type ExcelImportErrorCode =
   | 'INVALID_WORKBOOK'
+  | 'WORKBOOK_TOO_LARGE'
+  | 'QUIZ_LIMIT_EXCEEDED'
   | 'WORKSHEET_NOT_FOUND'
   | 'EMPTY_QUIZ'
   | 'AMBIGUOUS_HEADER'

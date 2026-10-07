@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { io as connect, type Socket } from 'socket.io-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApplication } from '../src/app.ts';
+import { readConfig } from '../src/config/env.ts';
 import { InMemorySessionRepository } from '../src/domain/session/in-memory-session-repository.ts';
 import type {
   ClientToServerEvents,
@@ -402,6 +403,82 @@ describe('Fase 5: creación, lobby y reconexión por Socket.IO', () => {
     expect(
       sessions.getSession(second.session.sessionId).participants.size,
     ).toBe(0);
+  });
+
+  it('notifica caducidad, libera rooms y permite reutilizar conexiones y código sin arrastrar participantes', async () => {
+    await new Promise<void>((resolve) => application.io.close(() => resolve()));
+    let now = 1000;
+    sessions = new SessionService(repository, {
+      now: () => now,
+      joinCodeGenerator: () => 'ABC234',
+    });
+    application = createApplication({
+      sessions,
+      workbookStorage: storage,
+      logger,
+      config: readConfig({ SESSION_TTL_MINUTES: '1' }),
+    });
+    await listen();
+    const teacher = await createTeacher();
+    const pupil = await client();
+    await join(pupil, teacher.session.joinCode, 'Ana');
+    const teacherExpired = nextEvent(teacher.socket, 'session:expired');
+    const pupilExpired = nextEvent(pupil, 'session:expired');
+    now += 60_000;
+    application.cleanupSessions();
+    await Promise.all([teacherExpired, pupilExpired]);
+    expect(repository.size).toBe(0);
+    expect(
+      application.io.sockets.adapter.rooms.has(
+        `session:${teacher.session.sessionId}`,
+      ),
+    ).toBe(false);
+    expect(
+      application.io.sockets.adapter.rooms.has(
+        `teacher:${teacher.session.sessionId}`,
+      ),
+    ).toBe(false);
+    expect(teacher.socket.connected).toBe(true);
+    const created = nextEvent(teacher.socket, 'session:created');
+    teacher.socket.emit('teacher:create-session', {
+      workbookReference: reference,
+    });
+    const next = await created;
+    expect(next.joinCode).toBe(teacher.session.joinCode);
+    expect(next.sessionId).not.toBe(teacher.session.sessionId);
+    expect(next.lobby.participants).toEqual([]);
+    const restored = await join(pupil, next.joinCode, 'Ana');
+    expect(restored.lobby.participants).toHaveLength(1);
+  });
+
+  it('acota las descargas simultáneas y evita partidas huérfanas tras desconectar durante la carga', async () => {
+    const releases: Array<(data: Buffer) => void> = [];
+    const download = vi
+      .spyOn(storage, 'downloadWorkbook')
+      .mockImplementation(
+        () => new Promise<Buffer>((resolve) => releases.push(resolve)),
+      );
+    const pending: Client[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const socket = await client();
+      pending.push(socket);
+      socket.emit('teacher:create-session', { workbookReference: reference });
+    }
+    await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(4));
+    const fifth = await client();
+    const rejected = nextEvent(fifth, 'app:error');
+    fifth.emit('teacher:create-session', { workbookReference: reference });
+    expect(await rejected).toMatchObject({ code: 'SERVER_BUSY' });
+    expect(download).toHaveBeenCalledTimes(4);
+    for (const socket of pending) socket.disconnect();
+    await vi.waitFor(() => expect(application.io.sockets.sockets.size).toBe(1));
+    for (const release of releases) release(data);
+    await vi.waitFor(() =>
+      expect(application.io.sockets.sockets.get(fifth.id!)?.data.busy).toBe(
+        false,
+      ),
+    );
+    expect(repository.size).toBe(0);
   });
 
   it('bloquea creaciones concurrentes desde el mismo socket', async () => {

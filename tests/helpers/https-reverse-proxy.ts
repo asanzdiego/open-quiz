@@ -1,13 +1,14 @@
 import { request, type IncomingMessage } from 'node:http';
 import { createServer } from 'node:https';
-import type { AddressInfo, Socket } from 'node:net';
+import type { AddressInfo } from 'node:net';
+import type { Duplex } from 'node:stream';
 
 /** Termina TLS y reenvía HTTP y Upgrade conservando el Host público. */
 export async function createHttpsReverseProxy(
   upstreamPort: number,
   tls: { key: string; cert: string },
 ) {
-  const connections = new Set<Socket>();
+  const connections = new Set<Duplex>();
   const upstreamHeaders = (incoming: IncomingMessage) => ({
     ...incoming.headers,
     'x-forwarded-proto': 'https',

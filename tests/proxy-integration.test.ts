@@ -135,7 +135,10 @@ describe('Fase 9: HTTP y Socket.IO detrás de un proxy HTTPS', () => {
     });
     try {
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Upgrade fallido.')), 2500);
+        const timer = setTimeout(
+          () => reject(new Error('Upgrade fallido.')),
+          2500,
+        );
         socket.once('connect_error', (error) => {
           clearTimeout(timer);
           reject(error);
@@ -217,8 +220,9 @@ describe('Fase 9: HTTP y Socket.IO detrás de un proxy HTTPS', () => {
         const accepted = nextEvent(student, 'answer:accepted');
         student.emit('student:answer', {
           questionId: question.questionId,
-          answerOptionId: question.options.find((option) => option.text === '4')!
-            .id,
+          answerOptionId: question.options.find(
+            (option) => option.text === '4',
+          )!.id,
         });
         await accepted;
       }
@@ -230,8 +234,13 @@ describe('Fase 9: HTTP y Socket.IO detrás de un proxy HTTPS', () => {
       );
       teacher.emit('teacher:close-question', controls);
       expect(await ranking).toHaveLength(3);
-      expect(await saved).toMatchObject({ worksheetName: 'P01', status: 'saved' });
-      const finished = students.map((socket) => nextEvent(socket, 'game:ended'));
+      expect(await saved).toMatchObject({
+        worksheetName: 'P01',
+        status: 'saved',
+      });
+      const finished = students.map((socket) =>
+        nextEvent(socket, 'game:ended'),
+      );
       teacher.emit('teacher:end-game', controls);
       for (const result of await Promise.all(finished)) {
         expect(result.podium).toHaveLength(3);

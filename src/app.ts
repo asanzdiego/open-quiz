@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import express, { type ErrorRequestHandler } from 'express';
 import { Server } from 'socket.io';
@@ -32,6 +32,8 @@ export function createApplication(options: ApplicationOptions = {}) {
     new SessionService(undefined, {
       questionDurationMs: config.questionDurationMs,
       maxPointsPerQuestion: config.maxPointsPerQuestion,
+      maxSessions: config.maxSessions,
+      maxParticipantsPerSession: config.maxParticipantsPerSession,
     });
   const storage =
     options.workbookStorage ??
@@ -40,6 +42,41 @@ export function createApplication(options: ApplicationOptions = {}) {
       : undefined);
   const app = express();
   app.disable('x-powered-by');
+  const securityHeaders = {
+    'Content-Security-Policy':
+      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  };
+  function headersFor(request: IncomingMessage) {
+    let connections = "'self'";
+    try {
+      const url = new URL(
+        config.publicOrigin ?? `http://${request.headers.host}`,
+      );
+      if (
+        config.publicOrigin ||
+        url.host === request.headers.host?.toLowerCase()
+      )
+        connections += config.publicOrigin
+          ? ` ${url.protocol === 'https:' ? 'wss' : 'ws'}://${url.host}`
+          : ` ws://${url.host} wss://${url.host}`;
+    } catch {
+      /* No construir una política con un Host inválido. */
+    }
+    return {
+      ...securityHeaders,
+      'Content-Security-Policy': securityHeaders[
+        'Content-Security-Policy'
+      ].replace("connect-src 'self'", `connect-src ${connections}`),
+    };
+  }
+  app.use((request, response, next) => {
+    response.set(headersFor(request));
+    next();
+  });
 
   app.get('/health', (_request, response) => {
     response.set('Cache-Control', 'no-store').json({ status: 'ok' });
@@ -72,6 +109,10 @@ export function createApplication(options: ApplicationOptions = {}) {
   >(httpServer, {
     maxHttpBufferSize: 16 * 1024,
     allowRequest: (request, callback) => {
+      if (io.engine.clientsCount >= config.maxConnections) {
+        callback(null, false);
+        return;
+      }
       const origin = request.headers.origin;
       if (!origin) {
         callback(null, true);
@@ -81,13 +122,28 @@ export function createApplication(options: ApplicationOptions = {}) {
         const url = new URL(origin);
         callback(
           null,
-          ['http:', 'https:'].includes(url.protocol) &&
-            url.host === request.headers.host,
+          origin === url.origin &&
+            ['http:', 'https:'].includes(url.protocol) &&
+            (config.publicOrigin
+              ? origin === config.publicOrigin
+              : url.host === request.headers.host),
         );
       } catch {
         callback(null, false);
       }
     },
+  });
+  // Engine.IO procesa el handshake antes de Express.
+  io.engine.on(
+    'headers',
+    (headers: Record<string, string>, request: IncomingMessage) => {
+      Object.assign(headers, headersFor(request));
+    },
+  );
+  // El bundle de Socket.IO también se sirve antes del middleware de Express.
+  httpServer.prependListener('request', (request, response) => {
+    for (const [name, value] of Object.entries(headersFor(request)))
+      response.setHeader(name, value);
   });
   const realtime = registerLobbyHandlers(io, {
     sessions,
@@ -95,18 +151,20 @@ export function createApplication(options: ApplicationOptions = {}) {
     ...(options.logger ? { logger: options.logger } : {}),
   });
 
-  const cleanup = setInterval(() => {
+  const cleanupSessions = () => {
     sessions.cleanupExpired({
       sessionTtlMs: config.sessionTtlMs,
       finishedSessionTtlMs: config.finishedSessionTtlMs,
+      onExpired: realtime.expireSession,
     });
     realtime.pruneTimers();
-  }, 60_000);
+  };
+  const cleanup = setInterval(cleanupSessions, 60_000);
   cleanup.unref();
   httpServer.once('close', () => {
     clearInterval(cleanup);
     realtime.dispose();
   });
 
-  return { app, httpServer, io };
+  return { app, httpServer, io, cleanupSessions };
 }
