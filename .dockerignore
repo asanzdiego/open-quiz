@@ -1,0 +1,25 @@
+# Solo se envían al constructor los archivos necesarios para la imagen.
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.build.json
+!LICENSE
+!README.md
+!src/
+!src/**
+!public/
+!public/**
+!scripts/
+!scripts/healthcheck.mjs
+
+# Excluir también secretos que se añadieran dentro de las carpetas permitidas.
+**/.env*
+**/*.pem
+**/*.key
+**/.aws
+**/.codex
+**/.agents
+**/node_modules
